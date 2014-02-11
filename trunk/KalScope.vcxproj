@@ -80,8 +80,6 @@
     <LinkIncremental>false</LinkIncremental>
     <OutDir>$(SolutionDir)\$(Configuration)\</OutDir>
     <IntDir>$(Configuration)\</IntDir>
-    <IncludePath>c:\Program Files (x86)\Windows Kits\8.1\Include\shared;$(IncludePath)</IncludePath>
-    <LibraryPath>$(WindowsSDK_LibraryPath_x64);$(LibraryPath)</LibraryPath>
     <ExcludePath />
     <CustomBuildBeforeTargets>ClCompile</CustomBuildBeforeTargets>
   </PropertyGroup>
@@ -141,16 +139,17 @@
       <Parallelization>true</Parallelization>
       <OpenMPSupport>false</OpenMPSupport>
       <UseMSVC>true</UseMSVC>
-      <AdditionalIncludeDirectories>c:\Program Files (x86)\Windows Kits\8.1\Include\shared\;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>
+      </AdditionalIncludeDirectories>
       <DisablePrecompiledHeaderMessages>true</DisablePrecompiledHeaderMessages>
       <AdditionalOptions />
+      <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
-      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <GenerateDebugInformation>false</GenerateDebugInformation>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
-      <AdditionalDependencies>lib\x64\pthreadVC2.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <ResourceCompile>
       <Culture>0x0804</Culture>
@@ -169,7 +168,7 @@
     <ClInclude Include="targetver.h" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="..\..\..\aeanswiftriver%40gmail.com\KalScope\KalScope\core.cpp">
+    <ClCompile Include="core.cpp">
       <UseMSVC Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">false</UseMSVC>
       <UseMSVC Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</UseMSVC>
       <UseMSVC Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">false</UseMSVC>
@@ -181,7 +180,7 @@
       <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
       </PrecompiledHeaderFile>
     </ClCompile>
-    <ClCompile Include="..\..\..\aeanswiftriver%40gmail.com\KalScope\KalScope\interface.cpp" />
+    <ClCompile Include="interface.cpp" />
     <ClCompile Include="KalScope.cpp" />
     <ClCompile Include="stdafx.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Create</PrecompiledHeader>
@@ -194,7 +193,7 @@
     <ResourceCompile Include="KalScope.rc" />
   </ItemGroup>
   <ItemGroup>
-    <Image Include="..\..\..\aeanswiftriver%40gmail.com\KalScope\KalScope\testsplash.png" />
+    <Image Include="testsplash.png" />
     <Image Include="ashentech.bmp" />
     <Image Include="minstamp32.ico" />
     <Image Include="minstamp64.ico" />
