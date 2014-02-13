@@ -28,6 +28,5 @@
 #include <mutex>
 #include <random>
 
-
 using namespace Gdiplus;
 #pragma comment (lib,"Gdiplus.lib")
