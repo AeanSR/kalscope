@@ -8,7 +8,8 @@
 #include "KalScope.h"
 
 #define intelligence 5
-#define HASH_SIZE (0x40000 << intelligence)
+#define HASH_SIZE_DEFAULT (0x40000 << intelligence)
+size_t HASH_SIZE = HASH_SIZE_DEFAULT;
 #define SCORE_WIN  ((int64_t)(1ULL << 60))
 #define SCORE_LOSE (-SCORE_WIN)
 #define SCORE_AL4  ( (int64_t)( 1ULL << (intelligence & 1 ? 55 : 50) ))
@@ -44,6 +45,33 @@ typedef struct{
 	int app_m;
 } hash_t;
 hash_t* hash_table;
+
+
+int count_processor(){
+	SYSTEM_INFO info;
+	GetSystemInfo(&info);
+	return info.dwNumberOfProcessors;
+}
+
+size_t memory_to_use(){
+	MEMORYSTATUSEX mem;
+	mem.dwLength = sizeof(MEMORYSTATUSEX);
+	if (!GlobalMemoryStatusEx(&mem))
+		return HASH_SIZE_DEFAULT;
+	uint64_t a;
+	a = mem.ullAvailPhys;
+	a /= 2; /* Use half of available memory. */
+	a--;
+	a |= a >> 1;
+	a |= a >> 2;
+	a |= a >> 4;
+	a |= a >> 8;
+	a |= a >> 16;
+	a |= a >> 32;
+	a++;
+	a /= sizeof(hash_t);
+	return a > 0 ? a : HASH_SIZE_DEFAULT;
+}
 
 uint64_t zobrist_key(){
 	int x, y;
@@ -154,7 +182,7 @@ char eval_w(){
 				board[x    ][y + 1], board[x    ][y + 2], board[x    ][y + 3], board[x    ][y + 4],
 				board[x + 1][y    ], board[x + 2][y    ], board[x + 3][y    ], board[x + 4][y    ],
 				board[x + 1][y + 1], board[x + 2][y + 2], board[x + 3][y + 3], board[x + 4][y + 4],
-				
+
 			};
 			xmm1 = _mm_load_si128((__m128i*)cache);
 			xmm1 = _mm_and_si128(_mm_srli_epi32(xmm1, 16), xmm1);
@@ -229,6 +257,7 @@ void init_table(){
 	init_flag++;
 	int a, b, c, d;
 	static std::mt19937_64 rng;
+	HASH_SIZE = memory_to_use();
 	hash_table = new hash_t[HASH_SIZE];
 	for (a = 0; a < 15; a++)
 		for (b = 0; b < 15; b++){
@@ -407,14 +436,14 @@ int64_t eval_s(){
 	return score;
 }
 
-int64_t __fastcall alpha_beta(int64_t alpha, int64_t beta, int depth){
+int64_t __fastcall alpha_beta(int64_t alpha, int64_t beta, int depth, int maxdepth){
 	int64_t reg;
 	int x, y;
 	int by, bx = 0xfe;
 	int hy = 0xfe;
 	int hx = 0xfe;
 	hash_t* h = &hash_table[key % HASH_SIZE];
-	if (depth<intelligence){
+	if (depth < maxdepth){
 		/* Judge win / lose during recursive. */
 		switch (eval_w()){
 		case 1:
@@ -431,7 +460,7 @@ int64_t __fastcall alpha_beta(int64_t alpha, int64_t beta, int depth){
 				hy = h->y;
 				board[hx][hy] = 1;
 				key ^= zobrist[0][hx][hy];
-				reg = alpha_beta(alpha, beta, depth + 1);
+				reg = alpha_beta(alpha, beta, depth + 1, maxdepth);
 				board[hx][hy] = 0;
 				key ^= zobrist[0][hx][hy];
 				if (reg >= beta) return beta;
@@ -448,7 +477,7 @@ int64_t __fastcall alpha_beta(int64_t alpha, int64_t beta, int depth){
 					if (x == hx && y == hy) continue;
 					board[x][y] = 1;
 					key ^= zobrist[0][x][y];
-					reg = alpha_beta(alpha, beta, depth + 1);
+					reg = alpha_beta(alpha, beta, depth + 1, maxdepth);
 					board[x][y] = 0;
 					key ^= zobrist[0][x][y];
 					if (reg >= beta){
@@ -471,7 +500,7 @@ int64_t __fastcall alpha_beta(int64_t alpha, int64_t beta, int depth){
 				hy = h->y;
 				board[hx][hy] = 2;
 				key ^= zobrist[1][hx][hy];
-				reg = alpha_beta(alpha, beta, depth + 1);
+				reg = alpha_beta(alpha, beta, depth + 1, maxdepth);
 				board[hx][hy] = 0;
 				key ^= zobrist[1][hx][hy];
 				if (reg <= alpha) return alpha;
@@ -488,7 +517,7 @@ int64_t __fastcall alpha_beta(int64_t alpha, int64_t beta, int depth){
 					if (x == hx && y == hy) continue;
 					board[x][y] = 2;
 					key ^= zobrist[1][x][y];
-					reg = alpha_beta(alpha, beta, depth + 1);
+					reg = alpha_beta(alpha, beta, depth + 1, maxdepth);
 					board[x][y] = 0;
 					key ^= zobrist[1][x][y];
 					if (reg <= alpha){
@@ -541,9 +570,13 @@ void thread_body(int x, int y){
 	DCPY(0)DCPY(4)DCPY(8)DCPY(12);
 	board[x][y] = 1;
 	key = zobrist_key();
-	int64_t reg = alpha_beta(SCORE_LOSE, SCORE_LOSE + intelligence, 0);
-	if (reg == SCORE_LOSE + intelligence){
-		int64_t reg = alpha_beta(SCORE_LOSE + intelligence, SCORE_WIN + intelligence, 0);
+	int maxdepth = 1;
+	int64_t reg;
+	while (maxdepth <= intelligence){
+		reg = alpha_beta(SCORE_LOSE, SCORE_WIN + intelligence, 0, maxdepth);
+		if (reg <= SCORE_LOSE + intelligence || reg >= SCORE_WIN)
+			break;
+		maxdepth += 2;
 	}
 	tlock.lock();
 	if (reg > m || mx == 0xfe){
@@ -552,12 +585,6 @@ void thread_body(int x, int y){
 		my = y;
 	}
 	tlock.unlock();
-}
-
-int count_processor(){
-	SYSTEM_INFO info;
-	GetSystemInfo(&info);
-	return info.dwNumberOfProcessors;
 }
 
 void ai_run(){
