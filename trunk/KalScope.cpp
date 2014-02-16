@@ -110,7 +110,7 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
    hInst = hInstance; // 将实例句柄存储在全局变量中
 
    hWnd = CreateWindow(szWindowClass, szTitle, WS_OVERLAPPEDWINDOW,
-      CW_USEDEFAULT, 0, 410, 450, NULL, NULL, hInstance, NULL);
+      CW_USEDEFAULT, 0, 450, 450, NULL, NULL, hInstance, NULL);
 
    if (!hWnd)
    {
@@ -179,7 +179,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		// TODO:  在此添加任意绘图代码...
 		myGraphics = new Graphics(hdc);
 		myPen = new Pen(Color(255, 0, 0, 0), 1);
-
+		myGraphics->DrawRectangle(myPen, Rect(400, 20, 20, 20));
 		for (int i = 0; i < 375; i+= 25)
 			myGraphics->DrawLine(myPen, 20, 20 + i, 370, 20 + i);
 		for (int i = 0; i < 375; i += 25)
