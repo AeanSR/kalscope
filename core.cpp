@@ -436,6 +436,8 @@ int64_t eval_s(){
 	return score;
 }
 
+//uint64_t total, hit;
+
 int64_t __fastcall alpha_beta(int64_t alpha, int64_t beta, int depth, int maxdepth){
 	int64_t reg;
 	int x, y;
@@ -453,9 +455,11 @@ int64_t __fastcall alpha_beta(int64_t alpha, int64_t beta, int depth, int maxdep
 		default:
 			break;
 		}
+		//total++;
 		if (depth & 1){
 			/* Depth is even: maximum. */
 			if (h->key == key && h->app_m){
+				//hit++;
 				hx = h->x;
 				hy = h->y;
 				board[hx][hy] = 1;
@@ -496,6 +500,7 @@ int64_t __fastcall alpha_beta(int64_t alpha, int64_t beta, int depth, int maxdep
 		else{
 			/* Depth is odd: minimum. */
 			if (h->key == key && h->app_m){
+				//hit++;
 				hx = h->x;
 				hy = h->y;
 				board[hx][hy] = 2;
@@ -612,4 +617,9 @@ void ai_run(){
 		}
 	} while (tid && tid<256);
 	mainboard[mx][my] = 1;
+	/*char* s = (char*)alloca(20);
+	sprintf(s, "%.3f%%", ((double)hit / (double)total)*100.0);
+	MessageBoxA(0, s, s, 0);
+	total = 0;
+	hit = 0;*/
 }

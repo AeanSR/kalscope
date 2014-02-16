@@ -33,7 +33,7 @@ void paint_board(HWND hWnd){
 	::Graphics *myGraphics;
 	Gdiplus::Brush *myPen[3];
 	HDC hdc;
-	
+
 	hdc = GetDC(hWnd);
 	myGraphics = new ::Graphics(hdc);
 	myPen[1] = new Gdiplus::SolidBrush(Color(255, 255, 0, 0));
@@ -61,31 +61,73 @@ void clear_board(HWND hWnd){
 	InvalidateRect(hWnd, NULL, TRUE);
 }
 
-void board_clicked(HWND hWnd, unsigned int x, unsigned int y){
+int buzy = 0;
+
+void thinking(HWND hWnd){
+	HDC hdc = GetDC(hWnd);
+	double x = 0.0;
+	unsigned char r = 0;
+	unsigned char g = 0;
+	unsigned char b = 0;
+	Rect rct(401, 21, 19, 19);
+	Graphics gr(hdc);
+	std::chrono::milliseconds dur(50);
+	while (buzy){
+		r = (unsigned char)(256.0*cos(x));
+		g = (unsigned char)(256.0*cos(x + 1.0));
+		b = (unsigned char)(256.0*sin(x));
+		x += 0.1;
+		Brush* br = new SolidBrush(Color(r, g, b));
+		gr.FillRectangle(br, rct);
+		delete br;
+		std::this_thread::sleep_for(dur);
+	}
+}
+void piece(HWND hWnd, unsigned int x, unsigned int y){
+	if (buzy) return;
+	buzy = 1;
 	x -= 15;
 	y -= 15;
-	if (x % 25 > 10 || y % 25 > 10) return;
+	if (x % 25 > 10 || y % 25 > 10){ buzy = 0; return; }
 	x /= 25;
 	y /= 25;
-	if (x > 14 || y > 14) return;
-	if (mainboard[x][y]) return;
+	if (x > 14 || y > 14){ buzy = 0; return; }
+	if (mainboard[x][y]){ buzy = 0; return; }
 	mainboard[x][y] = 2;
 	paint_board(hWnd);
 	if (eval_win()){
 		MessageBox(hWnd, TEXT("Blue win."), TEXT(""), NULL);
 		clear_board(hWnd);
+		buzy = 0;
 		return;
 	}
 	if (eval_draw()){
 		MessageBox(hWnd, TEXT("Draw."), TEXT(""), NULL);
 		clear_board(hWnd);
+		buzy = 0;
 		return;
 	}
+	std::thread* t = new std::thread(thinking, hWnd);
+	t->detach();
 	ai_run();
 	paint_board(hWnd);
 	if (eval_win()){
 		MessageBox(hWnd, TEXT("Red win."), TEXT(""), NULL);
 		clear_board(hWnd);
+		buzy = 0;
 		return;
 	}
+	if (eval_draw()){
+		MessageBox(hWnd, TEXT("Draw."), TEXT(""), NULL);
+		clear_board(hWnd);
+		buzy = 0;
+		return;
+	}
+	buzy = 0;
+}
+
+void board_clicked(HWND hWnd, unsigned int x, unsigned int y){
+	if (buzy) return;
+	std::thread* t = new std::thread(piece, hWnd, x, y);
+	t->detach();
 }
