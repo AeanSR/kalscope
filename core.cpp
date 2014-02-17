@@ -36,13 +36,14 @@ std::thread* thm[225] = { NULL };
 size_t tid = 0;
 static uint64_t zobrist[2][16][16] = { 0 };
 uint64_t __declspec(thread) key = 0;
+enum{ TYPE_NON = 0, TYPE_PV = 1, TYPE_A = 2, TYPE_B = 3, };
 typedef struct{
 	uint64_t key;
 	int64_t value;
 	int x;
 	int y;
-	int app_s;
-	int app_m;
+	int type;
+	int depth;
 } hash_t;
 hash_t* hash_table;
 
@@ -95,23 +96,19 @@ uint64_t zobrist_key(){
 	return z;
 }
 
-void record_hash(int64_t score){
+void record_hash(int64_t score, int x = 0xfe, int y = 0xfe, int type = TYPE_NON, int depth = 0){
 	hash_t* p = &hash_table[key % HASH_SIZE];
 	hlock[key % 1024].lock();
-	if (p->key != key) p->app_m = 0;
+	if (p->depth > depth){
+		hlock[key % 1024].unlock();
+		return;
+	}
 	p->key = key;
 	p->value = score;
-	p->app_s = 1;
-	hlock[key % 1024].unlock();
-}
-void record_hash(int x, int y){
-	hash_t* p = &hash_table[key % HASH_SIZE];
-	hlock[key % 1024].lock();
-	if (p->key != key) p->app_s = 0;
-	p->key = key;
 	p->x = x;
 	p->y = y;
-	p->app_m = 1;
+	p->type = type;
+	p->depth = depth;
 	hlock[key % 1024].unlock();
 }
 
@@ -351,7 +348,7 @@ void init_table(){
 
 int64_t eval_s(){
 	hash_t* p = &hash_table[key % HASH_SIZE];
-	if (p->key == key && p->app_s)
+	if (p->key == key)
 		return p->value;
 	switch (eval_w()){
 	case 1:
@@ -365,19 +362,27 @@ int64_t eval_s(){
 	}
 	int x, y;
 	int64_t score = SCORE_BASE | (int64_t)rand();
-	for (x = 0; x < 15; x++)
-		for (y = 0; y < 15; y++){
-			if (!board[x][y]) continue;
+	unsigned long c;
+	static const __m128i xmm0 = _mm_setzero_si128();
+	static const __m128i xmm2 = _mm_set1_epi32(0xff);
+	for (x = 0; x < 15; x++){
+		y = 0;
+		__m128i xmm1 = _mm_loadu_si128((__m128i*)board[x]);
+		unsigned int mask = _mm_movemask_epi8(_mm_cmpeq_epi8(xmm0, xmm1));
+		mask = (~mask) & 0x7fff;
+		while (mask){
+			_BitScanForward(&c, mask);
+			y += c;
 			if (y < 11){
 				score += table_f[board[x][y + 4]]
-				[board[x][y + 3]]
+					[board[x][y + 3]]
 				[board[x][y + 2]]
 				[board[x][y + 1]]
 				[board[x][y]]
 				[(y == 0) ? 3 : board[x][y - 1]];
 				if (x > 3){
 					score += table_f[board[x - 4][y + 4]]
-					[board[x - 3][y + 3]]
+						[board[x - 3][y + 3]]
 					[board[x - 2][y + 2]]
 					[board[x - 1][y + 1]]
 					[board[x][y]]
@@ -387,14 +392,14 @@ int64_t eval_s(){
 			}
 			else if (y < 12){
 				score += table_f[3]
-				[board[x][y + 3]]
+					[board[x][y + 3]]
 				[board[x][y + 2]]
 				[board[x][y + 1]]
 				[board[x][y]]
 				[(y == 0) ? 3 : board[x][y - 1]];
 				if (x > 3){
 					score += table_f[3]
-					[board[x - 3][y + 3]]
+						[board[x - 3][y + 3]]
 					[board[x - 2][y + 2]]
 					[board[x - 1][y + 1]]
 					[board[x][y]]
@@ -403,13 +408,13 @@ int64_t eval_s(){
 			}
 			if (x < 11){
 				score += table_f[board[x + 4][y]]
-				[board[x + 3][y]]
+					[board[x + 3][y]]
 				[board[x + 2][y]]
 				[board[x + 1][y]]
 				[board[x][y]][(x == 0) ? 3 : board[x - 1][y]];
 				if (y < 11){
 					score += table_f[board[x + 4][y + 4]]
-					[board[x + 3][y + 3]]
+						[board[x + 3][y + 3]]
 					[board[x + 2][y + 2]]
 					[board[x + 1][y + 1]]
 					[board[x][y]]
@@ -418,20 +423,23 @@ int64_t eval_s(){
 			}
 			else if (x < 12){
 				score += table_f[3]
-				[board[x + 3][y]]
+					[board[x + 3][y]]
 				[board[x + 2][y]]
 				[board[x + 1][y]]
 				[board[x][y]][(x == 0) ? 3 : board[x - 1][y]];
 				if (y < 12){
 					score += table_f[3]
-					[board[x + 3][y + 3]]
+						[board[x + 3][y + 3]]
 					[board[x + 2][y + 2]]
 					[board[x + 1][y + 1]]
 					[board[x][y]]
 					[(y == 0 || x == 0) ? 3 : board[x - 1][y - 1]];
 				}
 			}
+			mask >>= c + 1;
+			y++;
 		}
+	}
 	record_hash(score);
 	return score;
 }
@@ -458,7 +466,15 @@ int64_t __fastcall alpha_beta(int64_t alpha, int64_t beta, int depth, int maxdep
 		//total++;
 		if (depth & 1){
 			/* Depth is even: maximum. */
-			if (h->key == key && h->app_m){
+			if (h->key == key && h->depth >= maxdepth - depth){
+				if (h->type == TYPE_PV)
+					return h->value;
+				else if (h->type == TYPE_B && h->value >= beta)
+					return beta;
+				else if (h->type == TYPE_A && h->value <= alpha)
+					return alpha;
+			}
+			if (h->key == key && h->type && h->x != 0xfe){
 				//hit++;
 				hx = h->x;
 				hy = h->y;
@@ -467,7 +483,10 @@ int64_t __fastcall alpha_beta(int64_t alpha, int64_t beta, int depth, int maxdep
 				reg = alpha_beta(alpha, beta, depth + 1, maxdepth);
 				board[hx][hy] = 0;
 				key ^= zobrist[0][hx][hy];
-				if (reg >= beta) return beta;
+				if (reg >= beta){
+					record_hash(reg, hx, hy, TYPE_B, maxdepth - depth);
+					return beta;
+				}
 				if (reg > alpha){
 					alpha = reg;
 					bx = hx;
@@ -485,7 +504,7 @@ int64_t __fastcall alpha_beta(int64_t alpha, int64_t beta, int depth, int maxdep
 					board[x][y] = 0;
 					key ^= zobrist[0][x][y];
 					if (reg >= beta){
-						record_hash(x, y);
+						record_hash(reg, x, y, TYPE_B, maxdepth - depth);
 						return beta;
 					}
 					if (reg > alpha){
@@ -494,12 +513,21 @@ int64_t __fastcall alpha_beta(int64_t alpha, int64_t beta, int depth, int maxdep
 						by = y;
 					}
 				}
-			if (bx != 0xfe) record_hash(bx, by);
+			if (bx != 0xfe) record_hash(alpha, bx, by, TYPE_PV, maxdepth - depth);
+			else record_hash(alpha, 0xfe, 0xfe, TYPE_A, maxdepth - depth);
 			return alpha;
 		}
 		else{
 			/* Depth is odd: minimum. */
-			if (h->key == key && h->app_m){
+			if (h->key == key && h->depth >= maxdepth - depth){
+				if (h->type == TYPE_PV)
+					return h->value;
+				else if (h->type == TYPE_B && h->value >= beta)
+					return beta;
+				else if (h->type == TYPE_A && h->value <= alpha)
+					return alpha;
+			}
+			if (h->key == key && h->type && h->x != 0xfe){
 				//hit++;
 				hx = h->x;
 				hy = h->y;
@@ -508,7 +536,10 @@ int64_t __fastcall alpha_beta(int64_t alpha, int64_t beta, int depth, int maxdep
 				reg = alpha_beta(alpha, beta, depth + 1, maxdepth);
 				board[hx][hy] = 0;
 				key ^= zobrist[1][hx][hy];
-				if (reg <= alpha) return alpha;
+				if (reg <= alpha){
+					record_hash(reg, hx, hy, TYPE_A, maxdepth - depth);
+					return alpha;
+				}
 				if (reg < beta){
 					beta = reg;
 					bx = hx;
@@ -526,7 +557,7 @@ int64_t __fastcall alpha_beta(int64_t alpha, int64_t beta, int depth, int maxdep
 					board[x][y] = 0;
 					key ^= zobrist[1][x][y];
 					if (reg <= alpha){
-						record_hash(x, y);
+						record_hash(reg, x, y, TYPE_A, maxdepth - depth);
 						return alpha;
 					}
 					if (reg < beta){
@@ -535,7 +566,8 @@ int64_t __fastcall alpha_beta(int64_t alpha, int64_t beta, int depth, int maxdep
 						by = y;
 					}
 				}
-			if (bx != 0xfe) record_hash(bx, by);
+			if (bx != 0xfe) record_hash(beta, bx, by, TYPE_PV, maxdepth - depth);
+			else record_hash(beta, 0xfe, 0xfe, TYPE_B, maxdepth - depth);
 			return beta;
 		}
 	}else{
