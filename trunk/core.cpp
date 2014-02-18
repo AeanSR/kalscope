@@ -1,7 +1,9 @@
 /*
 	KalScope - A Gomoku AI Implement
 	AI Core Module
-	AeanSR<aeanswiftriver@gmail.com>
+	Copyright (C) 2014 AeanSR <http://aean.net/>, HUST
+
+	Free to use, copy, modify or distribute. No warranty is given.
 */
 
 #include "stdafx.h"
@@ -96,7 +98,7 @@ uint64_t zobrist_key(){
 	return z;
 }
 
-void record_hash(int64_t score, int x = 0xfe, int y = 0xfe, int type = TYPE_NON, int depth = 0){
+void __fastcall record_hash(int64_t score, int x = 0xfe, int y = 0xfe, int type = TYPE_NON, int depth = 0){
 	hash_t* p = &hash_table[key % HASH_SIZE];
 	hlock[key % 1024].lock();
 	if (p->depth > depth){
@@ -235,14 +237,30 @@ char eval_win(){
 			not_le = x > 3;
 			not_re = x < 11;
 			if (not_be){
-				ret |= mainboard[x][y] & mainboard[x][y + 1] & mainboard[x][y + 2] & mainboard[x][y + 3] & mainboard[x][y + 4];
+				ret |= mainboard[x][y]
+				     & mainboard[x][y + 1]
+				     & mainboard[x][y + 2]
+				     & mainboard[x][y + 3]
+				     & mainboard[x][y + 4];
 				if (not_le)
-					ret |= mainboard[x][y] & mainboard[x - 1][y + 1] & mainboard[x - 2][y + 2] & mainboard[x - 3][y + 3] & mainboard[x - 4][y + 4];
+					ret |= mainboard[x][y]
+					     & mainboard[x - 1][y + 1]
+					     & mainboard[x - 2][y + 2]
+					     & mainboard[x - 3][y + 3]
+					     & mainboard[x - 4][y + 4];
 			}
 			if (not_re){
-				ret |= mainboard[x][y] & mainboard[x + 1][y] & mainboard[x + 2][y] & mainboard[x + 3][y] & mainboard[x + 4][y];
+				ret |= mainboard[x][y]
+                     & mainboard[x + 1][y]
+                     & mainboard[x + 2][y]
+                     & mainboard[x + 3][y]
+                     & mainboard[x + 4][y];
 				if (not_be)
-					ret |= mainboard[x][y] & mainboard[x + 1][y + 1] & mainboard[x + 2][y + 2] & mainboard[x + 3][y + 3] & mainboard[x + 4][y + 4];
+					ret |= mainboard[x][y]
+					     & mainboard[x + 1][y + 1]
+					     & mainboard[x + 2][y + 2]
+					     & mainboard[x + 3][y + 3]
+					     & mainboard[x + 4][y + 4];
 			}
 			if (ret) return ret;
 		}
@@ -444,8 +462,6 @@ int64_t eval_s(){
 	return score;
 }
 
-//uint64_t total, hit;
-
 int64_t __fastcall alpha_beta(int64_t alpha, int64_t beta, int depth, int maxdepth){
 	int64_t reg;
 	int x, y;
@@ -463,7 +479,6 @@ int64_t __fastcall alpha_beta(int64_t alpha, int64_t beta, int depth, int maxdep
 		default:
 			break;
 		}
-		//total++;
 		if (depth & 1){
 			/* Depth is even: maximum. */
 			if (h->key == key && h->depth >= maxdepth - depth){
@@ -475,7 +490,6 @@ int64_t __fastcall alpha_beta(int64_t alpha, int64_t beta, int depth, int maxdep
 					return alpha;
 			}
 			if (h->key == key && h->type && h->x != 0xfe){
-				//hit++;
 				hx = h->x;
 				hy = h->y;
 				board[hx][hy] = 1;
@@ -528,7 +542,6 @@ int64_t __fastcall alpha_beta(int64_t alpha, int64_t beta, int depth, int maxdep
 					return alpha;
 			}
 			if (h->key == key && h->type && h->x != 0xfe){
-				//hit++;
 				hx = h->x;
 				hy = h->y;
 				board[hx][hy] = 2;
@@ -602,7 +615,6 @@ void pushmove(int _x, int _y){
 	msl.unlock();
 }
 
-
 void thread_body(int x, int y){
 	DCPY(0)DCPY(4)DCPY(8)DCPY(12);
 	board[x][y] = 1;
@@ -636,10 +648,6 @@ void ai_run(){
 			if (mainidle(x, y)) continue;
 			thm[tid++] = new std::thread(thread_body, x, y);
 		}
-	/*for (tid = 0; tid < ccpu; tid++){
-		pthread_create(&thm[tid], NULL, &thread_body, NULL);
-		SetThreadAffinityMask( pthread_getw32threadhandle_np(thm[tid]), 1 << tid);
-	}*/
 	do{
 		--tid;
 		if (thm[tid]){
@@ -649,9 +657,4 @@ void ai_run(){
 		}
 	} while (tid && tid<256);
 	mainboard[mx][my] = 1;
-	/*char* s = (char*)alloca(20);
-	sprintf(s, "%.3f%%", ((double)hit / (double)total)*100.0);
-	MessageBoxA(0, s, s, 0);
-	total = 0;
-	hit = 0;*/
 }
