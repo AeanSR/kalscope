@@ -9,28 +9,30 @@
 #include "stdafx.h"
 #include "KalScope.h"
 
-#define intelligence 5
+/* Search Depth. This intelligence macro is equal to max depth minus 2.  */
+#define intelligence 6
+
 #define HASH_SIZE_DEFAULT (0x40000 << intelligence)
-size_t HASH_SIZE = HASH_SIZE_DEFAULT;
-#define SCORE_WIN  ((int64_t)(1ULL << 60))
+size_t HASH_SIZE = HASH_SIZE_DEFAULT - 1;
+#define SCORE_WIN  ((int32_t)(1ULL << 30))
 #define SCORE_LOSE (-SCORE_WIN)
-#define SCORE_AL4  ( (int64_t)( 1ULL << (intelligence & 1 ? 55 : 50) ))
-#define SCORE_EL4  (-(int64_t)( 1ULL << (intelligence & 1 ? 50 : 55) ))
-#define SCORE_AL3  ( (int64_t)( 1ULL << (intelligence & 1 ? 45 : 40) ))
-#define SCORE_EL3  (-(int64_t)( 1ULL << (intelligence & 1 ? 40 : 45) ))
-#define SCORE_AC4  ( (int64_t)( 1ULL << (intelligence & 1 ? 45 : 40) ))
-#define SCORE_EC4  (-(int64_t)( 1ULL << (intelligence & 1 ? 40 : 45) ))
-#define SCORE_AC3  ( (int64_t)( 1ULL << (intelligence & 1 ? 35 : 30) ))
-#define SCORE_EC3  (-(int64_t)( 1ULL << (intelligence & 1 ? 30 : 35) ))
-#define SCORE_AM   ( (int64_t)( 1ULL << 15 ))
-#define SCORE_EM   (-(int64_t)( 1ULL << 15 ))
-#define SCORE_BASE (intelligence & 1 ? 0x7C1F07E0000000LL : 0xF83E0F820000000LL)
+#define SCORE_AL4  ( (int32_t)( 1UL << (intelligence & 1 ? 28 : 25) ))
+#define SCORE_EL4  (-(int32_t)( 1UL << (intelligence & 1 ? 25 : 28) ))
+#define SCORE_AL3  ( (int32_t)( 1UL << (intelligence & 1 ? 22 : 18) ))
+#define SCORE_EL3  (-(int32_t)( 1UL << (intelligence & 1 ? 18 : 22) ))
+#define SCORE_AC4  ( (int32_t)( 1UL << (intelligence & 1 ? 22 : 18) ))
+#define SCORE_EC4  (-(int32_t)( 1UL << (intelligence & 1 ? 18 : 22) ))
+#define SCORE_AC3  ( (int32_t)( 1UL << (intelligence & 1 ? 14 : 10) ))
+#define SCORE_EC3  (-(int32_t)( 1UL << (intelligence & 1 ? 10 : 14) ))
+#define SCORE_AM   ( (int32_t)( 1UL << 0 ))
+#define SCORE_EM   (-(int32_t)( 1UL << 0 ))
+#define SCORE_BASE (0UL)//(intelligence & 1 ? 0x7C1F07E0000000LL : 0xF83E0F820000000LL)
 
 char mainboard[16][16] = { 0 };
 char __declspec(thread) board[19][32] = { 0 };
-static int64_t table_f[4][4][4][4][4][4] = { 0 };
+static int32_t table_f[4][4][4][4][4][4] = { 0 };
 static int init_flag = 0;
-int64_t m;
+int32_t m;
 int my, mx = 0xfe;
 std::mutex tlock;
 std::mutex hlock[1024];
@@ -41,11 +43,11 @@ uint64_t __declspec(thread) key = 0;
 enum{ TYPE_NON = 0, TYPE_PV = 1, TYPE_A = 2, TYPE_B = 3, };
 typedef struct{
 	uint64_t key;
-	int64_t value;
-	int x;
-	int y;
-	int type;
-	int depth;
+	int32_t value;
+	char x;
+	char y;
+	char type;
+	char depth;
 } hash_t;
 hash_t* hash_table;
 
@@ -98,8 +100,8 @@ uint64_t zobrist_key(){
 	return z;
 }
 
-void __fastcall record_hash(int64_t score, int x = 0xfe, int y = 0xfe, int type = TYPE_NON, int depth = 0){
-	hash_t* p = &hash_table[key % HASH_SIZE];
+void __fastcall record_hash(int32_t score, int x = 0xfe, int y = 0xfe, int type = TYPE_NON, int depth = 0){
+	hash_t* p = &hash_table[key & HASH_SIZE];
 	hlock[key % 1024].lock();
 	if (p->depth > depth){
 		hlock[key % 1024].unlock();
@@ -272,8 +274,9 @@ void init_table(){
 	init_flag++;
 	int a, b, c, d;
 	static std::mt19937_64 rng;
-	HASH_SIZE = memory_to_use();
-	hash_table = new hash_t[HASH_SIZE];
+	HASH_SIZE = memory_to_use() - 1;
+	hash_table = new hash_t[HASH_SIZE+1];
+	memset(hash_table, 0, sizeof(hash_t)*(HASH_SIZE+1)); //Occupy memory. Avoid another kalscope process allocate hash table too large.
 	for (a = 0; a < 15; a++)
 		for (b = 0; b < 15; b++){
 			zobrist[0][a][b] = rng();
@@ -364,8 +367,8 @@ void init_table(){
 	table_f[3][2][2][0][2][0] = SCORE_EC3;
 }
 
-int64_t eval_s(){
-	hash_t* p = &hash_table[key % HASH_SIZE];
+int32_t eval_s(){
+	hash_t* p = &hash_table[key & HASH_SIZE];
 	if (p->key == key)
 		return p->value;
 	switch (eval_w()){
@@ -379,7 +382,7 @@ int64_t eval_s(){
 		break;
 	}
 	int x, y;
-	int64_t score = SCORE_BASE | (int64_t)rand();
+	int32_t score = SCORE_BASE;
 	unsigned long c;
 	static const __m128i xmm0 = _mm_setzero_si128();
 	static const __m128i xmm2 = _mm_set1_epi32(0xff);
@@ -462,136 +465,99 @@ int64_t eval_s(){
 	return score;
 }
 
-int64_t __fastcall alpha_beta(int64_t alpha, int64_t beta, int depth, int maxdepth){
-	int64_t reg;
+int32_t __fastcall alpha_beta(int32_t alpha, int32_t beta, int depth){
+	int32_t reg;
 	int x, y;
 	int by, bx = 0xfe;
 	int hy = 0xfe;
 	int hx = 0xfe;
-	hash_t* h = &hash_table[key % HASH_SIZE];
-	if (depth < maxdepth){
-		/* Judge win / lose during recursive. */
-		switch (eval_w()){
-		case 1:
-			return SCORE_WIN + intelligence - depth;
-		case 2:
-			return SCORE_LOSE + depth;
-		default:
-			break;
+	int who2move = (depth & 1 ? 1 : -1);
+	char color = (who2move > 0 ? 1 : 2);
+	hash_t* h = &hash_table[key & HASH_SIZE];
+	if (depth){
+		int found = !(h->key ^ key);
+		// If TT returned a deeper history result, use it.
+		if (found && h->depth >= depth){
+			if (h->type == TYPE_PV)
+				return h->value;
+			else if (h->type == TYPE_B && h->value >= beta)
+				return beta;
+			else if (h->type == TYPE_A && h->value <= alpha)
+				return alpha;
 		}
-		if (depth & 1){
-			/* Depth is even: maximum. */
-			if (h->key == key && h->depth >= maxdepth - depth){
-				if (h->type == TYPE_PV)
-					return h->value;
-				else if (h->type == TYPE_B && h->value >= beta)
-					return beta;
-				else if (h->type == TYPE_A && h->value <= alpha)
-					return alpha;
+
+		/* Judge win / lose during recursive. */
+		if (found){
+			// TT.
+			if (h->value >= SCORE_WIN)
+				return who2move * h->value;
+			else if (h->value <= SCORE_LOSE + intelligence)
+				return who2move * h->value;
+		}
+		else
+			// If TT not hit, call eval_w().
+			switch (eval_w()){
+			case 1:
+				return who2move * (SCORE_WIN + depth);
+			case 2:
+				return who2move * (SCORE_LOSE + intelligence - depth);
+			default:
+				break;
 			}
-			if (h->key == key && h->type && h->x != 0xfe){
-				hx = h->x;
-				hy = h->y;
-				board[hx][hy] = 1;
-				key ^= zobrist[0][hx][hy];
-				reg = alpha_beta(alpha, beta, depth + 1, maxdepth);
-				board[hx][hy] = 0;
-				key ^= zobrist[0][hx][hy];
+		
+		// If TT suggested a best move, search it first.
+		if (h->key == key && h->type && h->x != 0xfe){
+			hx = h->x;
+			hy = h->y;
+			board[hx][hy] = color;
+			key ^= zobrist[color - 1][hx][hy];
+			reg = -alpha_beta(-beta, -alpha, depth - 1);
+			board[hx][hy] = 0;
+			key ^= zobrist[color - 1][hx][hy];
+			if (reg >= beta){
+				record_hash(reg, hx, hy, TYPE_B, depth);
+				return beta;
+			}
+			if (reg > alpha){
+				alpha = reg;
+				bx = hx;
+				by = hy;
+			}
+		}
+
+		// Search all moves.
+		for (x = 0; x < 15; x++)
+			for (y = 0; y < 15; y++){
+				if (idle(x, y)) continue;
+				if (x == hx && y == hy) continue; // Don't duplicate search on TT best move.
+				board[x][y] = color;
+				key ^= zobrist[color - 1][x][y];
+				reg = -alpha_beta(-beta, -alpha, depth - 1);
+				board[x][y] = 0;
+				key ^= zobrist[color - 1][x][y];
 				if (reg >= beta){
-					record_hash(reg, hx, hy, TYPE_B, maxdepth - depth);
+					record_hash(reg, x, y, TYPE_B, depth);
 					return beta;
 				}
 				if (reg > alpha){
 					alpha = reg;
-					bx = hx;
-					by = hy;
+					bx = x;
+					by = y;
 				}
 			}
-
-			for (x = 0; x < 15; x++)
-				for (y = 0; y < 15; y++){
-					if (idle(x, y)) continue;
-					if (x == hx && y == hy) continue;
-					board[x][y] = 1;
-					key ^= zobrist[0][x][y];
-					reg = alpha_beta(alpha, beta, depth + 1, maxdepth);
-					board[x][y] = 0;
-					key ^= zobrist[0][x][y];
-					if (reg >= beta){
-						record_hash(reg, x, y, TYPE_B, maxdepth - depth);
-						return beta;
-					}
-					if (reg > alpha){
-						alpha = reg;
-						bx = x;
-						by = y;
-					}
-				}
-			if (bx != 0xfe) record_hash(alpha, bx, by, TYPE_PV, maxdepth - depth);
-			else record_hash(alpha, 0xfe, 0xfe, TYPE_A, maxdepth - depth);
-			return alpha;
-		}
-		else{
-			/* Depth is odd: minimum. */
-			if (h->key == key && h->depth >= maxdepth - depth){
-				if (h->type == TYPE_PV)
-					return h->value;
-				else if (h->type == TYPE_B && h->value >= beta)
-					return beta;
-				else if (h->type == TYPE_A && h->value <= alpha)
-					return alpha;
-			}
-			if (h->key == key && h->type && h->x != 0xfe){
-				hx = h->x;
-				hy = h->y;
-				board[hx][hy] = 2;
-				key ^= zobrist[1][hx][hy];
-				reg = alpha_beta(alpha, beta, depth + 1, maxdepth);
-				board[hx][hy] = 0;
-				key ^= zobrist[1][hx][hy];
-				if (reg <= alpha){
-					record_hash(reg, hx, hy, TYPE_A, maxdepth - depth);
-					return alpha;
-				}
-				if (reg < beta){
-					beta = reg;
-					bx = hx;
-					by = hy;
-				}
-			}
-
-			for (x = 0; x < 15; x++)
-				for (y = 0; y < 15; y++){
-					if (idle(x, y)) continue;
-					if (x == hx && y == hy) continue;
-					board[x][y] = 2;
-					key ^= zobrist[1][x][y];
-					reg = alpha_beta(alpha, beta, depth + 1, maxdepth);
-					board[x][y] = 0;
-					key ^= zobrist[1][x][y];
-					if (reg <= alpha){
-						record_hash(reg, x, y, TYPE_A, maxdepth - depth);
-						return alpha;
-					}
-					if (reg < beta){
-						beta = reg;
-						bx = x;
-						by = y;
-					}
-				}
-			if (bx != 0xfe) record_hash(beta, bx, by, TYPE_PV, maxdepth - depth);
-			else record_hash(beta, 0xfe, 0xfe, TYPE_B, maxdepth - depth);
-			return beta;
-		}
-	}else{
-		/* Depth == intelligence: call evaluation function. */
-		return eval_s();
+		if (bx != 0xfe) record_hash(alpha, bx, by, TYPE_PV, depth);
+		else record_hash(alpha, 0xfe, 0xfe, TYPE_A, depth);
+		return alpha;
+	}
+	else{
+		/* Depth == 0: call evaluation function. */
+		return who2move * eval_s();
 	}
 }
 
-#define CPY(v) memcpy(board[(v)],mainboard[(v)],16);
-#define DCPY(v) CPY(v)CPY((v)+1)CPY((v)+2)CPY((v)+3)
-
+#define CPY(v) memcpy(board[(v)],mainboard[(v)],16)
+#define DCPY(v) CPY(v);CPY((v)+1);CPY((v)+2);CPY((v)+3)
+#define COPYBOARD() DCPY(0);DCPY(4);DCPY(8);DCPY(12)
 int msx[225];
 int msy[225];
 int msp;
@@ -615,39 +581,67 @@ void pushmove(int _x, int _y){
 	msl.unlock();
 }
 
-void thread_body(int x, int y){
-	DCPY(0)DCPY(4)DCPY(8)DCPY(12);
-	board[x][y] = 1;
-	key = zobrist_key();
-	int maxdepth = 1;
-	int64_t reg;
-	while (maxdepth <= intelligence){
-		reg = alpha_beta(SCORE_LOSE, SCORE_WIN + intelligence, 0, maxdepth);
-		if (reg <= SCORE_LOSE + intelligence || reg >= SCORE_WIN)
-			break;
-		maxdepth += 2;
+void thread_body(){
+	COPYBOARD();
+	int x, y;
+	int32_t localm;
+	while (getmove(x, y)){
+		board[x][y] = 1;
+		key = zobrist_key();
+		int maxdepth = 0;
+		int32_t reg;
+		while (maxdepth <= intelligence){
+			tlock.lock();
+			localm = m;
+			tlock.unlock();
+			reg = -alpha_beta(-SCORE_WIN + intelligence, -localm, maxdepth);
+			if (reg <= SCORE_LOSE + intelligence || reg >= SCORE_WIN)
+				break;
+			maxdepth += 2;
+		}
+		tlock.lock();
+		if (reg > m || mx == 0xfe){
+			m = reg;
+			mx = x;
+			my = y;
+		}
+		tlock.unlock();
+		board[x][y] = 0;
 	}
-	tlock.lock();
-	if (reg > m || mx == 0xfe){
-		m = reg;
-		mx = x;
-		my = y;
-	}
-	tlock.unlock();
 }
 
 void ai_run(){
 	int x, y;
 	tid = 0;
 	mx = 0xfe;
-	m = INT64_MIN;
+	m = SCORE_LOSE;
 	init_table();
-	//static const int ccpu = count_processor();
+	static const int ccpu = count_processor();
+	
+	int bx = 0xfe;
+	int by = 0xfe;
+	COPYBOARD();
+	uint64_t k = zobrist_key();
+	hash_t* h = &hash_table[k & (HASH_SIZE-1)];
+	if (h->key == key && h->type){
+		bx = h->x;
+		by = h->y;
+		if (bx >= 15 || bx < 0 || by >= 15 || by < 0){
+			bx = 0xfe;
+			by = 0xfe;
+		}
+	}
+
 	for (x = 0; x < 15; x++)
 		for (y = 0; y < 15; y++){
 			if (mainidle(x, y)) continue;
-			thm[tid++] = new std::thread(thread_body, x, y);
+			if (x == bx&&y == by) continue;
+			pushmove(x, y);
 		}
+	if (bx != 0xfe)
+		pushmove(bx, by);
+	for (x = 0; x < ccpu; x++)
+		thm[tid++] = new std::thread(thread_body);
 	do{
 		--tid;
 		if (thm[tid]){
@@ -657,4 +651,9 @@ void ai_run(){
 		}
 	} while (tid && tid<256);
 	mainboard[mx][my] = 1;
+	/*
+	char* s = (char*)alloca(20);
+	sprintf(s, "%lld", m);
+	MessageBoxA(0, s, s, 0);
+	*/
 }
