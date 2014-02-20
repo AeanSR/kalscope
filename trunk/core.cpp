@@ -9,7 +9,7 @@
 #include "stdafx.h"
 #include "KalScope.h"
 
-/* Search Depth. This intelligence macro is equal to max depth minus 2.  */
+/* Search Depth. This intelligence macro is equal to max depth minus 1.  */
 #define intelligence 6
 
 //Evaluate score defination.
