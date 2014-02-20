@@ -12,8 +12,7 @@
 /* Search Depth. This intelligence macro is equal to max depth minus 2.  */
 #define intelligence 6
 
-#define HASH_SIZE_DEFAULT (0x40000 << intelligence)
-size_t HASH_SIZE = HASH_SIZE_DEFAULT - 1;
+//Evaluate score defination.
 #define SCORE_WIN  ((int32_t)(1ULL << 30))
 #define SCORE_LOSE (-SCORE_WIN)
 #define SCORE_AL4  ( (int32_t)( 1UL << (intelligence & 1 ? 28 : 25) ))
@@ -26,20 +25,8 @@ size_t HASH_SIZE = HASH_SIZE_DEFAULT - 1;
 #define SCORE_EC3  (-(int32_t)( 1UL << (intelligence & 1 ? 10 : 14) ))
 #define SCORE_AM   ( (int32_t)( 1UL << 0 ))
 #define SCORE_EM   (-(int32_t)( 1UL << 0 ))
-#define SCORE_BASE (0UL)//(intelligence & 1 ? 0x7C1F07E0000000LL : 0xF83E0F820000000LL)
+#define SCORE_BASE (0UL)
 
-char mainboard[16][16] = { 0 };
-char __declspec(thread) board[19][32] = { 0 };
-static int32_t table_f[4][4][4][4][4][4] = { 0 };
-static int init_flag = 0;
-int32_t m;
-int my, mx = 0xfe;
-std::mutex tlock;
-std::mutex hlock[1024];
-std::thread* thm[225] = { NULL };
-size_t tid = 0;
-static uint64_t zobrist[2][16][16] = { 0 };
-uint64_t __declspec(thread) key = 0;
 enum{ TYPE_NON = 0, TYPE_PV = 1, TYPE_A = 2, TYPE_B = 3, };
 typedef struct{
 	uint64_t key;
@@ -49,8 +36,41 @@ typedef struct{
 	char type;
 	char depth;
 } hash_t;
-hash_t* hash_table;
+struct move_t{
+	int32_t score;
+	int x;
+	int y;
+	void swap(move_t& m){
+		move_t t = m;
+		m = *this;
+		*this = t;
+	}
+};
 
+//Structure for board representation.
+char mainboard[16][16] = { 0 };
+char __declspec(thread) board[19][32] = { 0 };
+
+//Structure for evaluate lookup table.
+static int32_t table_f[4][4][4][4][4][4] = { 0 };
+static int init_flag = 0;
+
+//Structure for result reduce.
+int32_t m;
+int my, mx = 0xfe;
+
+//Structure for thread sync.
+std::mutex tlock;
+std::mutex hlock[1024];
+std::thread* thm[225] = { NULL };
+size_t tid = 0;
+
+//Structure for TT.
+#define HASH_SIZE_DEFAULT (0x40000 << intelligence)
+size_t HASH_SIZE = HASH_SIZE_DEFAULT - 1;
+static uint64_t zobrist[2][16][16] = { 0 };
+uint64_t __declspec(thread) key = 0;
+hash_t* hash_table;
 
 int count_processor(){
 	SYSTEM_INFO info;
@@ -122,15 +142,19 @@ char __forceinline idle(int x, int y){
 	int rx = x + 1;
 	int ty = y > 0 ? y - 1 : y;
 	int by = y + 1;
-	__declspec(align(16)) char cache[8] = {
-		board[lx][ty],board[lx][y],board[lx][by],
-		board[x][ty] ,             board[x][by] ,
-		board[rx][ty],board[rx][y],board[rx][by]
-	};
-	__m128i xmm1 = _mm_loadl_epi64((__m128i*)cache);
-	__m128i xmm0 = _mm_setzero_si128();
-	xmm1 = _mm_cmpeq_epi64(xmm1, xmm0);
-	return _mm_movemask_epi8(xmm1);
+	char a = board[lx][ty];
+	char b = board[lx][y];
+	char c = board[lx][by];
+	char d = board[x][ty];
+	a |= board[x][by];
+	b |= board[rx][ty];
+	c |= board[rx][y];
+	d |= board[rx][by];
+	a |= b;
+	c |= d;
+	a |= c;
+	a = (unsigned char)(-a) >> 7;
+	return a-1;
 }
 
 char __forceinline mainidle(int x, int y){
@@ -465,6 +489,89 @@ int32_t eval_s(){
 	return score;
 }
 
+
+void __fastcall move_sort(move_t* movelist, int first, int last){
+	if (last - first > 1){
+		int i = first + 1;
+		int j = last;
+		int32_t key = movelist[first].score;
+		while (1){
+			while (key > movelist[j].score)
+				j--;
+			while (key < movelist[i].score && i<j)
+				i++;
+			if (i >= j) break;
+			movelist[i].swap(movelist[j]);
+			if (movelist[i].score == key)
+				j--;
+			else
+				i++;
+		}
+		movelist[j].swap(movelist[first]);
+		if (first  < i - 1) move_sort(movelist, first, i - 1);
+		if (j + 1 < last) move_sort(movelist, j + 1, last);
+	}
+	else{
+		if (movelist[first].score < movelist[last].score){
+			movelist[first].swap(movelist[last]);
+		}
+	}
+
+}
+int move_gen(move_t* movelist, hash_t* h, int color, int depth){
+	int count = 0;
+	int hx = 0xfe;
+	int hy = 0xfe;
+	int x, y;
+	uint64_t k;
+	hash_t* p;
+	if (h->key == key && h->type && h->x != 0xfe){
+		hx = h->x;
+		hy = h->y;
+	}
+	if(depth >= 2){
+		for (x = 0; x < 15; x++)
+			for (y = 0; y < 15; y++){
+				if (idle(x, y)) continue;
+				if ((x ^ hx) | (y ^ hy)) {
+					k = key ^ zobrist[color - 1][x][y];
+					p = &hash_table[k & HASH_SIZE];
+					int64_t mask = p->key;
+					movelist[count].x = x;
+					movelist[count].y = y;
+					count++;
+					mask ^= k;
+					mask |= (-mask);
+					mask = (uint64_t)mask >> 63;
+					mask = -mask;
+					movelist[count].score = mask & p->value;
+				}
+				else{
+					movelist[count].score = INT32_MAX;
+					movelist[count].x = x;
+					movelist[count].y = y;
+					count++;
+				}
+
+			}
+	}
+	else{
+		for (x = 0; x < 15; x++)
+			for (y = 0; y < 15; y++){
+				if (idle(x, y)) continue;
+				if ((x ^ hx) | (y ^ hy))
+					movelist[count].score = 0;
+				else
+					movelist[count].score = INT32_MAX;
+				movelist[count].x = x;
+				movelist[count].y = y;
+				count++;
+			}
+	}
+	move_sort(movelist, 0, count - 1);
+	return count;
+}
+
 int32_t __fastcall alpha_beta(int32_t alpha, int32_t beta, int depth){
 	int32_t reg;
 	int x, y;
@@ -475,7 +582,8 @@ int32_t __fastcall alpha_beta(int32_t alpha, int32_t beta, int depth){
 	char color = (who2move > 0 ? 1 : 2);
 	hash_t* h = &hash_table[key & HASH_SIZE];
 	if (depth){
-		int found = !(h->key ^ key);
+		bool found = !(h->key ^ key);
+
 		// If TT returned a deeper history result, use it.
 		if (found && h->depth >= depth){
 			if (h->type == TYPE_PV)
@@ -505,46 +613,30 @@ int32_t __fastcall alpha_beta(int32_t alpha, int32_t beta, int depth){
 				break;
 			}
 		
-		// If TT suggested a best move, search it first.
-		if (h->key == key && h->type && h->x != 0xfe){
-			hx = h->x;
-			hy = h->y;
-			board[hx][hy] = color;
-			key ^= zobrist[color - 1][hx][hy];
+		//Generate all moves and sort.
+		move_t mlist[225];
+		int count = move_gen(mlist, h, color, depth);
+
+		// Search all moves.
+		for (int i = 0; i < count; i++)
+		{
+			x = mlist[i].x;
+			y = mlist[i].y;
+			board[x][y] = color;
+			key ^= zobrist[color - 1][x][y];
 			reg = -alpha_beta(-beta, -alpha, depth - 1);
-			board[hx][hy] = 0;
-			key ^= zobrist[color - 1][hx][hy];
+			board[x][y] = 0;
+			key ^= zobrist[color - 1][x][y];
 			if (reg >= beta){
-				record_hash(reg, hx, hy, TYPE_B, depth);
+				record_hash(reg, x, y, TYPE_B, depth);
 				return beta;
 			}
 			if (reg > alpha){
 				alpha = reg;
-				bx = hx;
-				by = hy;
+				bx = x;
+				by = y;
 			}
 		}
-
-		// Search all moves.
-		for (x = 0; x < 15; x++)
-			for (y = 0; y < 15; y++){
-				if (idle(x, y)) continue;
-				if (x == hx && y == hy) continue; // Don't duplicate search on TT best move.
-				board[x][y] = color;
-				key ^= zobrist[color - 1][x][y];
-				reg = -alpha_beta(-beta, -alpha, depth - 1);
-				board[x][y] = 0;
-				key ^= zobrist[color - 1][x][y];
-				if (reg >= beta){
-					record_hash(reg, x, y, TYPE_B, depth);
-					return beta;
-				}
-				if (reg > alpha){
-					alpha = reg;
-					bx = x;
-					by = y;
-				}
-			}
 		if (bx != 0xfe) record_hash(alpha, bx, by, TYPE_PV, depth);
 		else record_hash(alpha, 0xfe, 0xfe, TYPE_A, depth);
 		return alpha;
@@ -558,8 +650,7 @@ int32_t __fastcall alpha_beta(int32_t alpha, int32_t beta, int depth){
 #define CPY(v) memcpy(board[(v)],mainboard[(v)],16)
 #define DCPY(v) CPY(v);CPY((v)+1);CPY((v)+2);CPY((v)+3)
 #define COPYBOARD() DCPY(0);DCPY(4);DCPY(8);DCPY(12)
-int msx[225];
-int msy[225];
+move_t msa[225];
 int msp;
 std::mutex msl;
 
@@ -569,15 +660,16 @@ bool getmove(int& _x, int& _y){
 		msl.unlock();
 		return 0;
 	}
-	_x = msx[--msp];
-	_y = msy[msp];
+	_x = msa[--msp].x;
+	_y = msa[msp].y;
 	msl.unlock();
 	return 1;
 }
-void pushmove(int _x, int _y){
+void pushmove(int _x, int _y, int32_t score){
 	msl.lock();
-	msx[msp] = _x;
-	msy[msp++] = _y;
+	msa[msp].x = _x;
+	msa[msp].y = _y;
+	msa[msp++].score = score;
 	msl.unlock();
 }
 
@@ -617,7 +709,8 @@ void ai_run(){
 	m = SCORE_LOSE;
 	init_table();
 	static const int ccpu = count_processor();
-	
+	int mvcount = 0;
+
 	int bx = 0xfe;
 	int by = 0xfe;
 	COPYBOARD();
@@ -636,10 +729,18 @@ void ai_run(){
 		for (y = 0; y < 15; y++){
 			if (mainidle(x, y)) continue;
 			if (x == bx&&y == by) continue;
-			pushmove(x, y);
+			k ^= zobrist[0][x][y];
+			hash_t* p = &hash_table[k & HASH_SIZE];
+			pushmove(x, y, -(p->key == k ? p->value : 0) );
+			k ^= zobrist[0][x][y];
+			mvcount++;
 		}
-	if (bx != 0xfe)
-		pushmove(bx, by);
+	if (bx != 0xfe){
+		mvcount++;
+		pushmove(bx, by, INT32_MIN);
+	}	
+	move_sort(msa, 0, mvcount - 1);
+
 	for (x = 0; x < ccpu; x++)
 		thm[tid++] = new std::thread(thread_body);
 	do{
