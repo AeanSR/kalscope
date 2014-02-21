@@ -316,7 +316,7 @@ void init_table(){
 			zobrist[0][a][b] = rng();
 			zobrist[1][a][b] = rng();
 		}
-	
+
 	for (a = 0; a < 4; a++)
 		for (b = 0; b < 4; b++)
 			for (c = 0; c < 4; c++){
@@ -341,7 +341,7 @@ void init_table(){
 					table_f[a][b][c][d][2][2] += SCORE_EM;
 				}
 			}
-			
+
 	table_f[0][1][1][1][1][3] = SCORE_AC4;
 	table_f[0][1][1][1][1][2] = SCORE_AC4;
 	table_f[0][1][1][1][1][0] = SCORE_AL4 * 2;
@@ -599,7 +599,7 @@ int move_gen(move_t* movelist, hash_t* h, int color, int depth){
 				count++;
 			}
 	}
-	
+
 	return count;
 }
 
@@ -615,14 +615,14 @@ int32_t __fastcall alpha_beta(int32_t alpha, int32_t beta, int depth, int is_pv)
 	hash_t* h = &hash_table[key & HASH_SIZE];
 	bool found = !(h->key ^ key);
 
-	if (depth){		
+	if (depth){
 		// If TT returned a deeper history result, use it.
 		if (found && h->depth >= depth){
 			if (h->type == TYPE_PV)
 				return h->value;
 			else if (h->type == TYPE_B)
 				alpha = max32(alpha, h->value);
-			else if (h->type == TYPE_A && h->value <= alpha)
+			else if (h->type == TYPE_A)
 				beta = min32(beta, h->value);
 			if (alpha >= beta)
 				return h->value;
@@ -645,7 +645,7 @@ int32_t __fastcall alpha_beta(int32_t alpha, int32_t beta, int depth, int is_pv)
 			default:
 				break;
 			}
-		
+
 		//Generate all moves and sort.
 		move_t mlist[225];
 		int count = move_gen(mlist, h, color, depth);
@@ -796,7 +796,7 @@ void ai_run(){
 	if (bx != 0xfe){
 		mvcount++;
 		pushmove(bx, by, INT32_MIN);
-	}	
+	}
 	move_sort(msa, 0, mvcount - 1);
 
 	for (x = 0; x < ccpu; x++)
