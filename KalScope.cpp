@@ -209,12 +209,13 @@ INT_PTR CALLBACK About(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
 	switch (message)
 	{
 	case WM_INITDIALOG:
+		SetDlgItemTextA(hDlg, ID_CODENAME, codename_str );
 		return (INT_PTR)TRUE;
 
 	case WM_COMMAND:
 		if (LOWORD(wParam) == IDURL && HIWORD(wParam) == BN_CLICKED)
 		{
-			ShellExecute(NULL, TEXT("open"), TEXT("http://aean.sinaapp.com"), NULL, NULL, SW_SHOWNORMAL);
+			ShellExecute(NULL, TEXT("open"), TEXT("http://aean.net/"), NULL, NULL, SW_SHOWNORMAL);
 			EndDialog(hDlg, LOWORD(wParam));
 			return (INT_PTR)TRUE;
 		}
