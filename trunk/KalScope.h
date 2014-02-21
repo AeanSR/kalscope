@@ -13,3 +13,5 @@ char eval_null();
 void ai_run();
 void paint_board(HWND hWnd);
 void clear_board(HWND hWnd);
+
+extern const char codename_str[];

@@ -1,7 +1,7 @@
 /*
 	KalScope - A Gomoku AI Implement
 	AI Core Module
-	Copyright (C) 2014 AeanSR <http://aean.net/>, HUST
+	Copyright (C) 2014 AeanSR <http://aean.net/>
 
 	Free to use, copy, modify or distribute. No warranty is given.
 */
@@ -9,22 +9,31 @@
 #include "stdafx.h"
 #include "KalScope.h"
 
-/* Search Depth. This intelligence macro is equal to max depth minus 1.  */
-#define intelligence 6
+static const char codename_str[] = "AI Core Module \"Shadowglen\" 2014Feb.";
+
+/* Search Depth. This macro is equal to max depth minus 1.  */
+#define intelligence 5
+
+//Some branch-less macros.
+#define sshr32(v,d) (-(int32_t)((uint32_t)(v) >> d))
+#define max32(x,y)  ((x) - (((x) - (y)) & sshr32((x) - (y), 31)))
+#define min32(x,y)  ((y) + (((x) - (y)) & sshr32((x) - (y), 31)))
+#define abs32(v)    (((v) ^ sshr32((v), 31)) - sshr32((v), 31))
 
 //Evaluate score defination.
-#define SCORE_WIN  ((int32_t)(1ULL << 30))
+#define SCORE_WIN  ((int32_t)(1UL << 30))
 #define SCORE_LOSE (-SCORE_WIN)
-#define SCORE_AL4  ( (int32_t)( 1UL << (intelligence & 1 ? 28 : 25) ))
-#define SCORE_EL4  (-(int32_t)( 1UL << (intelligence & 1 ? 25 : 28) ))
-#define SCORE_AL3  ( (int32_t)( 1UL << (intelligence & 1 ? 22 : 18) ))
-#define SCORE_EL3  (-(int32_t)( 1UL << (intelligence & 1 ? 18 : 22) ))
-#define SCORE_AC4  ( (int32_t)( 1UL << (intelligence & 1 ? 22 : 18) ))
-#define SCORE_EC4  (-(int32_t)( 1UL << (intelligence & 1 ? 18 : 22) ))
-#define SCORE_AC3  ( (int32_t)( 1UL << (intelligence & 1 ? 14 : 10) ))
-#define SCORE_EC3  (-(int32_t)( 1UL << (intelligence & 1 ? 10 : 14) ))
-#define SCORE_AM   ( (int32_t)( 1UL << 0 ))
-#define SCORE_EM   (-(int32_t)( 1UL << 0 ))
+#define SCORE_AL4  ( (int32_t)( 1UL << 25 ))
+#define SCORE_EL4  (-(int32_t)( 1UL << 25 ))
+#define SCORE_AL3  ( (int32_t)( 1UL << 20 ))
+#define SCORE_EL3  (-(int32_t)( 1UL << 20 ))
+#define SCORE_AC4  ( (int32_t)( 1UL << 20 ))
+#define SCORE_EC4  (-(int32_t)( 1UL << 20 ))
+#define SCORE_AC3  ( (int32_t)( 1UL << 10 ))
+#define SCORE_EC3  (-(int32_t)( 1UL << 10 ))
+#define SCORE_AM   ( (int32_t)( 1UL << 0  ))
+#define SCORE_EM   (-(int32_t)( 1UL << 0  ))
+#define SCORE_MMASK ((int32_t)( 1UL << 10 ) - 1)
 #define SCORE_BASE (0UL)
 
 enum{ TYPE_NON = 0, TYPE_PV = 1, TYPE_A = 2, TYPE_B = 3, };
@@ -38,10 +47,11 @@ typedef struct{
 } hash_t;
 struct move_t{
 	int32_t score;
-	int x;
-	int y;
+	short x;
+	short y;
 	void swap(move_t& m){
-		move_t t = m;
+		move_t t;
+		t = m;
 		m = *this;
 		*this = t;
 	}
@@ -66,7 +76,7 @@ std::thread* thm[225] = { NULL };
 size_t tid = 0;
 
 //Structure for TT.
-#define HASH_SIZE_DEFAULT (0x40000 << intelligence)
+#define HASH_SIZE_DEFAULT (0x1000000)
 size_t HASH_SIZE = HASH_SIZE_DEFAULT - 1;
 static uint64_t zobrist[2][16][16] = { 0 };
 uint64_t __declspec(thread) key = 0;
@@ -154,7 +164,7 @@ char __forceinline idle(int x, int y){
 	c |= d;
 	a |= c;
 	a = (unsigned char)(-a) >> 7;
-	return a-1;
+	return a - 1;
 }
 
 char __forceinline mainidle(int x, int y){
@@ -296,7 +306,7 @@ char eval_win(){
 void init_table(){
 	if (init_flag) return;
 	init_flag++;
-	int a, b, c, d;
+	int a, b, c, d, e, f;
 	static std::mt19937_64 rng;
 	HASH_SIZE = memory_to_use() - 1;
 	hash_table = new hash_t[HASH_SIZE+1];
@@ -306,6 +316,7 @@ void init_table(){
 			zobrist[0][a][b] = rng();
 			zobrist[1][a][b] = rng();
 		}
+	
 	for (a = 0; a < 4; a++)
 		for (b = 0; b < 4; b++)
 			for (c = 0; c < 4; c++){
@@ -330,9 +341,10 @@ void init_table(){
 					table_f[a][b][c][d][2][2] += SCORE_EM;
 				}
 			}
+			
 	table_f[0][1][1][1][1][3] = SCORE_AC4;
 	table_f[0][1][1][1][1][2] = SCORE_AC4;
-	table_f[0][1][1][1][1][0] = SCORE_AL4;
+	table_f[0][1][1][1][1][0] = SCORE_AL4 * 2;
 	table_f[1][0][1][1][1][3] = SCORE_AC4;
 	table_f[1][0][1][1][1][2] = SCORE_AC4;
 	table_f[1][0][1][1][1][0] = SCORE_AL4;
@@ -345,7 +357,7 @@ void init_table(){
 
 	table_f[0][2][2][2][2][3] = SCORE_EC4;
 	table_f[0][2][2][2][2][1] = SCORE_EC4;
-	table_f[0][2][2][2][2][0] = SCORE_EL4;
+	table_f[0][2][2][2][2][0] = SCORE_EL4 * 2;
 	table_f[2][0][2][2][2][3] = SCORE_EC4;
 	table_f[2][0][2][2][2][1] = SCORE_EC4;
 	table_f[2][0][2][2][2][0] = SCORE_EL4;
@@ -389,27 +401,43 @@ void init_table(){
 	table_f[3][0][2][2][2][0] = SCORE_EC3 * 2;
 	table_f[3][2][0][2][2][0] = SCORE_EC3;
 	table_f[3][2][2][0][2][0] = SCORE_EC3;
+
+	for (a = 0; a < 4; a++)
+		for (b = 0; b < 4; b++)
+			for (c = 0; c < 4; c++)
+				for (d = 0; d < 4; d++)
+					for (e = 0; e < 4; e++)
+						for (f = 0; f < 4; f++){
+							int32_t t1 = table_f[a][b][c][d][e][f];
+							int32_t t2 = table_f[f][e][d][c][b][a];
+							if (abs32(t1) > abs32(t2)){
+								table_f[f][e][d][c][b][a] = t1;
+							}
+							else{
+								table_f[a][b][c][d][e][f] = t2;
+							}
+						}
+
 }
 
 int32_t eval_s(){
-	hash_t* p = &hash_table[key & HASH_SIZE];
+	/*hash_t* p = &hash_table[key & HASH_SIZE];
 	if (p->key == key)
-		return p->value;
+		return p->value;*/
 	switch (eval_w()){
 	case 1:
-		record_hash(SCORE_WIN);
+		//record_hash(SCORE_WIN);
 		return SCORE_WIN;
 	case 2:
-		record_hash(SCORE_LOSE);
+		//record_hash(SCORE_LOSE);
 		return SCORE_LOSE;
 	default:
 		break;
 	}
 	int x, y;
-	int32_t score = SCORE_BASE;
 	unsigned long c;
 	static const __m128i xmm0 = _mm_setzero_si128();
-	static const __m128i xmm2 = _mm_set1_epi32(0xff);
+	int32_t score = SCORE_BASE;
 	for (x = 0; x < 15; x++){
 		y = 0;
 		__m128i xmm1 = _mm_loadu_si128((__m128i*)board[x]);
@@ -485,7 +513,7 @@ int32_t eval_s(){
 			y++;
 		}
 	}
-	record_hash(score);
+	//record_hash(score);
 	return score;
 }
 
@@ -516,8 +544,8 @@ void __fastcall move_sort(move_t* movelist, int first, int last){
 			movelist[first].swap(movelist[last]);
 		}
 	}
-
 }
+
 int move_gen(move_t* movelist, hash_t* h, int color, int depth){
 	int count = 0;
 	int hx = 0xfe;
@@ -554,53 +582,58 @@ int move_gen(move_t* movelist, hash_t* h, int color, int depth){
 				}
 
 			}
+		move_sort(movelist, 0, count - 1);
 	}
 	else{
 		for (x = 0; x < 15; x++)
 			for (y = 0; y < 15; y++){
 				if (idle(x, y)) continue;
-				if ((x ^ hx) | (y ^ hy))
-					movelist[count].score = 0;
-				else
-					movelist[count].score = INT32_MAX;
 				movelist[count].x = x;
 				movelist[count].y = y;
+				if ((x ^ hx) | (y ^ hy))
+					movelist[count].score = 0;
+				else{
+					movelist[count].score = INT32_MAX;
+					movelist[0].swap(movelist[count]);
+				}
 				count++;
 			}
 	}
-	move_sort(movelist, 0, count - 1);
+	
 	return count;
 }
 
-int32_t __fastcall alpha_beta(int32_t alpha, int32_t beta, int depth){
+int32_t __fastcall alpha_beta(int32_t alpha, int32_t beta, int depth, int is_pv){
 	int32_t reg;
 	int x, y;
 	int by, bx = 0xfe;
 	int hy = 0xfe;
 	int hx = 0xfe;
-	int who2move = (depth & 1 ? 1 : -1);
+	int who2move = ((depth ^ intelligence) & 1 ? 1 : -1);
 	char color = (who2move > 0 ? 1 : 2);
+	int alpha_raised = 0;
 	hash_t* h = &hash_table[key & HASH_SIZE];
-	if (depth){
-		bool found = !(h->key ^ key);
+	bool found = !(h->key ^ key);
 
+	if (depth){		
 		// If TT returned a deeper history result, use it.
 		if (found && h->depth >= depth){
 			if (h->type == TYPE_PV)
 				return h->value;
-			else if (h->type == TYPE_B && h->value >= beta)
-				return beta;
+			else if (h->type == TYPE_B)
+				alpha = max32(alpha, h->value);
 			else if (h->type == TYPE_A && h->value <= alpha)
-				return alpha;
+				beta = min32(beta, h->value);
+			if (alpha >= beta)
+				return h->value;
 		}
 
 		/* Judge win / lose during recursive. */
-		if (found){
-			// TT.
-			if (h->value >= SCORE_WIN)
-				return who2move * h->value;
-			else if (h->value <= SCORE_LOSE + intelligence)
-				return who2move * h->value;
+		if (0){
+			// TT (disabled due to bug).
+			if (h->value <= SCORE_LOSE + intelligence || h->value >= SCORE_WIN){
+				return - h->value;
+			}
 		}
 		else
 			// If TT not hit, call eval_w().
@@ -624,7 +657,18 @@ int32_t __fastcall alpha_beta(int32_t alpha, int32_t beta, int depth){
 			y = mlist[i].y;
 			board[x][y] = color;
 			key ^= zobrist[color - 1][x][y];
-			reg = -alpha_beta(-beta, -alpha, depth - 1);
+
+			// Do principle variation search.
+			if (!is_pv || depth < 3)
+				reg = -alpha_beta(-beta, -alpha, depth - 1, 0);
+			else if (!alpha_raised)
+				reg = -alpha_beta(-beta, -alpha, depth - 1, 1);
+			else{
+				reg = -alpha_beta(-alpha - 1, -alpha, depth - 1, 0);
+				if (reg > alpha && reg < beta)
+					reg = -alpha_beta(-beta, -alpha, depth - 1, 1);
+			}
+
 			board[x][y] = 0;
 			key ^= zobrist[color - 1][x][y];
 			if (reg >= beta){
@@ -632,6 +676,7 @@ int32_t __fastcall alpha_beta(int32_t alpha, int32_t beta, int depth){
 				return beta;
 			}
 			if (reg > alpha){
+				alpha_raised = 1;
 				alpha = reg;
 				bx = x;
 				by = y;
@@ -643,7 +688,10 @@ int32_t __fastcall alpha_beta(int32_t alpha, int32_t beta, int depth){
 	}
 	else{
 		/* Depth == 0: call evaluation function. */
-		return who2move * eval_s();
+		if (found) return h->value;
+		reg = who2move * eval_s();
+		record_hash(reg);
+		return reg;
 	}
 }
 
@@ -680,15 +728,25 @@ void thread_body(){
 	while (getmove(x, y)){
 		board[x][y] = 1;
 		key = zobrist_key();
-		int maxdepth = 0;
+		int maxdepth = intelligence & 1;
 		int32_t reg;
 		while (maxdepth <= intelligence){
 			tlock.lock();
 			localm = m;
 			tlock.unlock();
-			reg = -alpha_beta(-SCORE_WIN + intelligence, -localm, maxdepth);
-			if (reg <= SCORE_LOSE + intelligence || reg >= SCORE_WIN)
+
+			if (localm <= SCORE_LOSE + intelligence)
+				reg = -alpha_beta(-SCORE_WIN - intelligence, -localm, maxdepth, 1);
+			else{
+				reg = -alpha_beta(-localm - 1, -localm, maxdepth, 0);
+				if (reg > localm && reg < SCORE_WIN)
+					reg = -alpha_beta(-SCORE_WIN - intelligence, -localm, maxdepth, 1);
+			}
+
+			if (reg <= SCORE_LOSE + intelligence || reg >= SCORE_WIN){
+				reg -= maxdepth;
 				break;
+			}
 			maxdepth += 2;
 		}
 		tlock.lock();
@@ -752,9 +810,4 @@ void ai_run(){
 		}
 	} while (tid && tid<256);
 	mainboard[mx][my] = 1;
-	/*
-	char* s = (char*)alloca(20);
-	sprintf(s, "%lld", m);
-	MessageBoxA(0, s, s, 0);
-	*/
 }
