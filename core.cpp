@@ -36,7 +36,13 @@ static const char codename_str[] = "AI Core Module \"Shadowglen\" 2014Feb.";
 #define SCORE_MMASK ((int32_t)( 1UL << 10 ) - 1)
 #define SCORE_BASE (0UL)
 
-enum{ TYPE_NON = 0, TYPE_PV = 1, TYPE_A = 2, TYPE_B = 3, };
+enum{
+	TYPE_NON = 0, TYPE_PV = 1, TYPE_A = 2, TYPE_B = 3,
+	EVALW_NON = 16, EVALW_WIN = 17, EVALW_LOSE = 18,
+};
+#define eval_stype(h) (0,((h)->type & 0xf))
+#define eval_wtype(h) (0,((h)->type >> 4 ))
+
 typedef struct{
 	uint64_t key;
 	int32_t value;
@@ -141,7 +147,7 @@ void __fastcall record_hash(int32_t score, int x = 0xfe, int y = 0xfe, int type 
 	p->value = score;
 	p->x = x;
 	p->y = y;
-	p->type = type;
+	p->type = (p->type & 0xf0) | type;
 	p->depth = depth;
 	hlock[key % 1024].unlock();
 }
@@ -186,7 +192,15 @@ char __forceinline mainidle(int x, int y){
 	return !t;
 }
 
-char eval_w(){
+char eval_w(hash_t* h = NULL){
+	if (h){
+		char type = eval_wtype(h) & 3;
+		switch (type){
+		case 0: break;
+		default: return type - 1;
+		}
+	}
+	char result = 0;
 	int x, y;
 	unsigned long c;
 	static const __m128i xmm0 = _mm_setzero_si128();
@@ -225,13 +239,15 @@ char eval_w(){
 			xmm1 = _mm_and_si128(xmm2, xmm1);
 			xmm1 =  _mm_or_si128(_mm_srli_si128(xmm1, 8), xmm1);
 			xmm1 =  _mm_or_si128(_mm_srli_si128(xmm1, 4), xmm1);
-			char result = board[x][y] & _mm_extract_epi16(xmm1, 0);
-			if (result) return result;
+			result = board[x][y] & _mm_extract_epi16(xmm1, 0);
+			if (result) goto evalw_return;
 			mask >>= c + 1;
 			y ++;
 		}
 	}
-	return 0;
+evalw_return:
+	if (h) h->type |= result + 1;
+	return result;
 }
 
 char eval_draw(){
@@ -553,7 +569,7 @@ int move_gen(move_t* movelist, hash_t* h, int color, int depth){
 	int x, y;
 	uint64_t k;
 	hash_t* p;
-	if (h->key == key && h->type && h->x != 0xfe){
+	if (h->key == key && eval_stype(h) && h->x != 0xfe){
 		hx = h->x;
 		hy = h->y;
 	}
@@ -618,33 +634,25 @@ int32_t __fastcall alpha_beta(int32_t alpha, int32_t beta, int depth, int is_pv)
 	if (depth){
 		// If TT returned a deeper history result, use it.
 		if (found && h->depth >= depth){
-			if (h->type == TYPE_PV)
+			if (eval_stype(h) == TYPE_PV)
 				return h->value;
-			else if (h->type == TYPE_B)
+			else if (eval_stype(h) == TYPE_B)
 				alpha = max32(alpha, h->value);
-			else if (h->type == TYPE_A)
+			else if (eval_stype(h) == TYPE_A)
 				beta = min32(beta, h->value);
 			if (alpha >= beta)
 				return h->value;
 		}
 
-		/* Judge win / lose during recursive. */
-		if (0){
-			// TT (disabled due to bug).
-			if (h->value <= SCORE_LOSE + intelligence || h->value >= SCORE_WIN){
-				return - h->value;
-			}
+		// Call eval_w().
+		switch (eval_w(found ? h : NULL)){
+		case 1:
+			return who2move * (SCORE_WIN + depth);
+		case 2:
+			return who2move * (SCORE_LOSE + intelligence - depth);
+		default:
+			break;
 		}
-		else
-			// If TT not hit, call eval_w().
-			switch (eval_w()){
-			case 1:
-				return who2move * (SCORE_WIN + depth);
-			case 2:
-				return who2move * (SCORE_LOSE + intelligence - depth);
-			default:
-				break;
-			}
 
 		//Generate all moves and sort.
 		move_t mlist[225];
@@ -672,7 +680,7 @@ int32_t __fastcall alpha_beta(int32_t alpha, int32_t beta, int depth, int is_pv)
 			board[x][y] = 0;
 			key ^= zobrist[color - 1][x][y];
 			if (reg >= beta){
-				record_hash(reg, x, y, TYPE_B, depth);
+				record_hash(beta, x, y, TYPE_B, depth);
 				return beta;
 			}
 			if (reg > alpha){
@@ -774,7 +782,7 @@ void ai_run(){
 	COPYBOARD();
 	uint64_t k = zobrist_key();
 	hash_t* h = &hash_table[k & (HASH_SIZE-1)];
-	if (h->key == key && h->type){
+	if (h->key == key && eval_stype(h)){
 		bx = h->x;
 		by = h->y;
 		if (bx >= 15 || bx < 0 || by >= 15 || by < 0){
