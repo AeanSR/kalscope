@@ -437,18 +437,10 @@ void init_table(){
 }
 
 int32_t eval_s(){
-	/*hash_t* p = &hash_table[key & HASH_SIZE];
-	if (p->key == key)
-		return p->value;*/
 	switch (eval_w()){
-	case 1:
-		//record_hash(SCORE_WIN);
-		return SCORE_WIN;
-	case 2:
-		//record_hash(SCORE_LOSE);
-		return SCORE_LOSE;
-	default:
-		break;
+	case 1: return SCORE_WIN;
+	case 2: return SCORE_LOSE;
+	default: break;
 	}
 	int x, y;
 	unsigned long c;
@@ -529,7 +521,6 @@ int32_t eval_s(){
 			y++;
 		}
 	}
-	//record_hash(score);
 	return score;
 }
 
@@ -619,16 +610,17 @@ int move_gen(move_t* movelist, hash_t* h, int color, int depth){
 	return count;
 }
 
-int32_t __fastcall alpha_beta(int32_t alpha, int32_t beta, int depth, int is_pv){
+int32_t __fastcall alpha_beta(int32_t alpha, int32_t beta, int depth, int who2move, int is_pv){
+	hash_t* h = &hash_table[key & HASH_SIZE];
+	_mm_prefetch((char*)h, _MM_HINT_NTA);
 	int32_t reg;
 	int x, y;
 	int by, bx = 0xfe;
 	int hy = 0xfe;
 	int hx = 0xfe;
-	int who2move = ((depth ^ intelligence) & 1 ? 1 : -1);
+	//int who2move = ((depth ^ intelligence) & 1 ? 1 : -1);
 	char color = (who2move > 0 ? 1 : 2);
 	int alpha_raised = 0;
-	hash_t* h = &hash_table[key & HASH_SIZE];
 	bool found = !(h->key ^ key);
 
 	if (depth){
@@ -668,13 +660,13 @@ int32_t __fastcall alpha_beta(int32_t alpha, int32_t beta, int depth, int is_pv)
 
 			// Do principle variation search.
 			if (!is_pv || depth < 3)
-				reg = -alpha_beta(-beta, -alpha, depth - 1, 0);
+				reg = -alpha_beta(-beta, -alpha, depth - 1, -who2move, 0);
 			else if (!alpha_raised)
-				reg = -alpha_beta(-beta, -alpha, depth - 1, 1);
+				reg = -alpha_beta(-beta, -alpha, depth - 1, -who2move, 1);
 			else{
-				reg = -alpha_beta(-alpha - 1, -alpha, depth - 1, 0);
+				reg = -alpha_beta(-alpha - 1, -alpha, depth - 1, -who2move, 0);
 				if (reg > alpha && reg < beta)
-					reg = -alpha_beta(-beta, -alpha, depth - 1, 1);
+					reg = -alpha_beta(-beta, -alpha, depth - 1, -who2move, 1);
 			}
 
 			board[x][y] = 0;
@@ -744,11 +736,11 @@ void thread_body(){
 			tlock.unlock();
 
 			if (localm <= SCORE_LOSE + intelligence)
-				reg = -alpha_beta(-SCORE_WIN - intelligence, -localm, maxdepth, 1);
+				reg = -alpha_beta(-SCORE_WIN - intelligence, -localm, maxdepth, -1, 1);
 			else{
-				reg = -alpha_beta(-localm - 1, -localm, maxdepth, 0);
+				reg = -alpha_beta(-localm - 1, -localm, maxdepth, -1, 0);
 				if (reg > localm && reg < SCORE_WIN)
-					reg = -alpha_beta(-SCORE_WIN - intelligence, -localm, maxdepth, 1);
+					reg = -alpha_beta(-SCORE_WIN - intelligence, -localm, maxdepth, -1, 1);
 			}
 
 			if (reg <= SCORE_LOSE + intelligence || reg >= SCORE_WIN){
