@@ -12,7 +12,7 @@
 static const char codename_str[] = "AI Core Module \"Shadowglen\" 2014Feb.";
 
 /* Search Depth. This macro is equal to max depth minus 1.  */
-#define intelligence 5
+#define intelligence 6
 
 //Some branch-less macros.
 #define sshr32(v,d) (-(int32_t)((uint32_t)(v) >> d))
@@ -80,6 +80,8 @@ std::mutex tlock;
 std::mutex hlock[1024];
 std::thread* thm[225] = { NULL };
 size_t tid = 0;
+volatile size_t ltc = 0;
+std::mutex ltclock;
 
 //Structure for TT.
 #define HASH_SIZE_DEFAULT (0x1000000)
@@ -93,6 +95,7 @@ int count_processor(){
 	GetSystemInfo(&info);
 	return info.dwNumberOfProcessors;
 }
+static const int ccpu = count_processor();
 
 size_t memory_to_use(){
 	MEMORYSTATUSEX mem;
@@ -508,9 +511,44 @@ int move_gen(move_t* movelist, hash_t* h, int color, int depth){
 	return count;
 }
 
+int32_t __fastcall alpha_beta(int32_t alpha, int32_t beta, int depth, int who2move, int is_pv);
+
+int32_t fork_subthread(bool* ready, move_t move, char b[][32], uint64_t k,
+	int32_t alpha, int32_t beta, int depth, int who2move)
+{
+	// Copy board from main.
+	for (int i = 0; i < 15; i++)
+		memcpy(board[i], b[i], 16);
+	*ready = 1;
+
+	// Set up.
+	key = k;
+	int32_t reg;
+	char color = (who2move > 0 ? 1 : 2);
+	int x = move.x;
+	int y = move.y;
+
+	// Make move.
+	board[x][y] = color;
+	key ^= zobrist[color - 1][x][y];
+
+	// Search.
+	reg = -alpha_beta(-alpha - 1, -alpha, depth - 1, -who2move, 0);
+	if (reg > alpha && reg < beta)
+		reg = -alpha_beta(-beta, -alpha, depth - 1, -who2move, 1);
+
+
+	// Ready to return, decrease ltc.
+	ltclock.lock();
+	ltc--;
+	ltclock.unlock();
+
+	return reg;
+}
+
 int32_t __fastcall alpha_beta(int32_t alpha, int32_t beta, int depth, int who2move, int is_pv){
 	hash_t* h = &hash_table[key & HASH_SIZE];
-	_mm_prefetch((char*)h, _MM_HINT_NTA);
+	//_mm_prefetch((char*)h, _MM_HINT_NTA);
 	int32_t reg;
 	int x, y;
 	int by, bx = 0xfe;
@@ -536,15 +574,42 @@ int32_t __fastcall alpha_beta(int32_t alpha, int32_t beta, int depth, int who2mo
 		if (eval_w(found ? h : NULL))
 			return alpha;
 
-		//Generate all moves and sort.
+		// Generate all moves and sort.
 		move_t mlist[225];
 		int count = move_gen(mlist, h, color, depth);
+
+		// Fork sub threads when appropriate.
+		int forked_move = 0;
+		std::future<int32_t> forked_return[4];
 
 		// Search all moves.
 		for (int i = 0; i < count; i++)
 		{
 			x = mlist[i].x;
 			y = mlist[i].y;
+
+			// If there's an idle CPU, try fork a sub thread.
+			// Only fork PV node, and alpha must be raised once.
+			if (is_pv && alpha_raised && depth > 3 && forked_move < 4 && ltc < ccpu){
+				ltclock.lock();
+				if (ltc < ccpu){
+					ltc++;
+					ltclock.unlock();
+					bool ready = 0;
+					forked_return[forked_move] = std::async(
+						fork_subthread, &ready, mlist[i], board, key,
+						alpha, beta, depth, who2move);
+					forked_move++;
+
+					// Wait for sub thread to make a board copy.
+					while (!ready)
+						std::this_thread::yield();
+					continue;
+				}
+				else ltclock.unlock();
+			}
+
+			// Make move.
 			board[x][y] = color;
 			key ^= zobrist[color - 1][x][y];
 
@@ -572,6 +637,22 @@ int32_t __fastcall alpha_beta(int32_t alpha, int32_t beta, int depth, int who2mo
 				by = y;
 			}
 		}
+
+		// At last, check sub threads' result if they could raise alpha.
+		while (forked_move--){
+			reg = forked_return[forked_move].get();
+			if (reg >= beta){
+				record_hash(beta, x, y, TYPE_B, depth);
+				return beta;
+			}
+			if (reg > alpha){
+				alpha_raised = 1;
+				alpha = reg;
+				bx = x;
+				by = y;
+			}
+		}
+
 		if (bx != 0xfe) record_hash(alpha, bx, by, TYPE_PV, depth);
 		else record_hash(alpha, 0xfe, 0xfe, TYPE_A, depth);
 		return alpha;
@@ -592,7 +673,7 @@ move_t msa[225];
 int msp;
 std::mutex msl;
 
-bool getmove(int& _x, int& _y){
+bool getmove(int& _x, int& _y, move_t** ptr = NULL){
 	msl.lock();
 	if (msp == 0){
 		msl.unlock();
@@ -600,6 +681,7 @@ bool getmove(int& _x, int& _y){
 	}
 	_x = msa[--msp].x;
 	_y = msa[msp].y;
+	if (ptr) *ptr = &msa[msp];
 	msl.unlock();
 	return 1;
 }
@@ -611,36 +693,30 @@ void pushmove(int _x, int _y, int32_t score){
 	msl.unlock();
 }
 
-void thread_body(){
+void thread_body(int maxdepth){
 	COPYBOARD();
 	int x, y;
 	int32_t localm;
-	while (getmove(x, y)){
+	int32_t reg;
+	move_t* mp;
+	while (getmove(x, y, &mp)){
 		board[x][y] = 1;
 		key = zobrist_key();
-		int maxdepth = intelligence & 1;
-		int32_t reg;
-		while (maxdepth <= intelligence){
-			tlock.lock();
-			localm = m;
-			tlock.unlock();
+		tlock.lock();
+		localm = m;
+		tlock.unlock();
 
-			if (localm <= SCORE_LOSE + intelligence)
-				reg = -alpha_beta(-SCORE_WIN - intelligence, -localm, maxdepth, -1, 1);
-			else{
-				reg = -alpha_beta(-localm - 1, -localm, maxdepth, -1, 0);
-				if (reg > localm && reg < SCORE_WIN)
-					reg = -alpha_beta(-SCORE_WIN - intelligence, -localm, maxdepth, -1, 1);
-			}
-
-			if (reg <= SCORE_LOSE + intelligence || reg >= SCORE_WIN){
-				reg -= maxdepth;
-				break;
-			}
-			maxdepth += 2;
+		if (localm <= SCORE_LOSE)
+			reg = -alpha_beta(-SCORE_WIN, -localm, maxdepth, -1, 1);
+		else{
+			reg = -alpha_beta(-localm - 1, -localm, maxdepth, -1, 0);
+			if (reg > localm && reg < SCORE_WIN)
+				reg = -alpha_beta(-SCORE_WIN, -localm, maxdepth, -1, 1);
 		}
+
 		tlock.lock();
 		if (reg > m || mx == 0xfe){
+			mp->score = -reg; // move_sort do descending, but we need a ascending sort.
 			m = reg;
 			mx = x;
 			my = y;
@@ -648,20 +724,22 @@ void thread_body(){
 		tlock.unlock();
 		board[x][y] = 0;
 	}
+
 }
 
 void ai_run(){
 	int x, y;
+
+	// Initialize.
 	tid = 0;
 	mx = 0xfe;
-	m = SCORE_LOSE;
 	init_table();
-	static const int ccpu = count_processor();
 	int mvcount = 0;
-
 	int bx = 0xfe;
 	int by = 0xfe;
 	COPYBOARD();
+
+	// Probe TT.
 	uint64_t k = zobrist_key();
 	hash_t* h = &hash_table[k & (HASH_SIZE-1)];
 	if (h->key == key && eval_stype(h)){
@@ -673,12 +751,14 @@ void ai_run(){
 		}
 	}
 
+	// Generate all moves.
 	for (x = 0; x < 15; x++)
 		for (y = 0; y < 15; y++){
 			if (mainidle(x, y)) continue;
 			if (x == bx&&y == by) continue;
 			k ^= zobrist[0][x][y];
 			hash_t* p = &hash_table[k & HASH_SIZE];
+			// move_sort do descending, but we need a ascending sort.
 			pushmove(x, y, -(p->key == k ? p->value : 0) );
 			k ^= zobrist[0][x][y];
 			mvcount++;
@@ -687,17 +767,50 @@ void ai_run(){
 		mvcount++;
 		pushmove(bx, by, INT32_MIN);
 	}
-	move_sort(msa, 0, mvcount - 1);
+	
+	// Iterative deeping.
+	int maxdepth = 0;
+	while (maxdepth <= intelligence){
+		msp = mvcount;
+		move_sort(msa, 0, mvcount - 1);
 
-	for (x = 0; x < ccpu; x++)
-		thm[tid++] = new std::thread(thread_body);
-	do{
-		--tid;
-		if (thm[tid]){
-			thm[tid]->join();
-			delete thm[tid];
-			thm[tid] = NULL;
-		}
-	} while (tid && tid<256);
+		// Young Brother Waits.
+		if (!getmove(x, y))
+			return;
+		mx = x;
+		my = y;
+		board[x][y] = 1;
+		key ^= zobrist[0][x][y];
+		ltc++;
+		m = -alpha_beta(-SCORE_WIN, -SCORE_LOSE, maxdepth, -1, 1);
+		board[x][y] = 0;
+		key ^= zobrist[0][x][y];
+
+		// Young brother start.
+		ltc = 0;
+		for (x = 0; x < ccpu; x++)
+			thm[tid++] = new std::thread(thread_body, maxdepth);
+		ltc = tid;
+
+		// Reduce.
+		do{
+			--tid;
+			ltclock.lock();
+			--ltc;
+			ltclock.unlock();
+			if (thm[tid]){
+				thm[tid]->join();
+				delete thm[tid];
+				thm[tid] = NULL;
+			}
+		} while (tid && tid < 256);
+
+		// If win / lose were already determined, we don't need to search more.
+		if (m >= SCORE_WIN || m <= SCORE_LOSE)
+			break;
+		maxdepth += 1;
+	}
+
+	// Make the actual move.
 	mainboard[mx][my] = 1;
 }
