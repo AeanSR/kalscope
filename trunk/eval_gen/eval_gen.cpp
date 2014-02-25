@@ -62,32 +62,32 @@ int main(void){
 	table_f[0][1][1][1][1][0] = SCORE_AL4;
 	table_f[1][0][1][1][1][3] = SCORE_AC4;
 	table_f[1][0][1][1][1][2] = SCORE_AC4;
-	table_f[1][0][1][1][1][0] = SCORE_AC4;
+	table_f[1][0][1][1][1][0] = SCORE_AC4 * 2;
 	table_f[1][1][0][1][1][3] = SCORE_AC4;
 	table_f[1][1][0][1][1][2] = SCORE_AC4;
-	table_f[1][1][0][1][1][0] = SCORE_AC4;
+	table_f[1][1][0][1][1][0] = SCORE_AC4 * 2;
 	table_f[1][1][1][0][1][3] = SCORE_AC4;
 	table_f[1][1][1][0][1][2] = SCORE_AC4;
-	table_f[1][1][1][0][1][0] = SCORE_AC4;
+	table_f[1][1][1][0][1][0] = SCORE_AC4 * 2;
 
 	table_f[0][2][2][2][2][3] = SCORE_EC4;
 	table_f[0][2][2][2][2][1] = SCORE_EC4;
 	table_f[0][2][2][2][2][0] = SCORE_EL4;
 	table_f[2][0][2][2][2][3] = SCORE_EC4;
 	table_f[2][0][2][2][2][1] = SCORE_EC4;
-	table_f[2][0][2][2][2][0] = SCORE_EC4;
+	table_f[2][0][2][2][2][0] = SCORE_EC4 * 2;
 	table_f[2][2][0][2][2][3] = SCORE_EC4;
 	table_f[2][2][0][2][2][1] = SCORE_EC4;
-	table_f[2][2][0][2][2][0] = SCORE_EC4;
+	table_f[2][2][0][2][2][0] = SCORE_EC4 * 2;
 	table_f[2][2][2][0][2][3] = SCORE_EC4;
 	table_f[2][2][2][0][2][1] = SCORE_EC4;
-	table_f[2][2][2][0][2][0] = SCORE_EC4;
+	table_f[2][2][2][0][2][0] = SCORE_EC4 * 2;
 
     /*
     "L3/C3" means "living-three / charging-three" which are likely the same concept above.
     Getting "double living-three" or "charging-four with living-three" first will lead to a certain win.
     */
-	table_f[0][0][1][1][1][0] = SCORE_AL3;
+	table_f[0][0][1][1][1][0] = SCORE_AL3 * 2;
 	table_f[0][0][1][1][1][2] = SCORE_AC3;
 	table_f[0][0][1][1][1][3] = SCORE_AC3;
 	table_f[0][1][0][1][1][0] = SCORE_AL3;
@@ -104,7 +104,7 @@ int main(void){
 	table_f[3][1][0][1][1][0] = SCORE_AC3;
 	table_f[3][1][1][0][1][0] = SCORE_AC3;
 
-	table_f[0][0][2][2][2][0] = SCORE_EL3;
+	table_f[0][0][2][2][2][0] = SCORE_EL3 * 2;
 	table_f[0][0][2][2][2][1] = SCORE_EC3;
 	table_f[0][0][2][2][2][3] = SCORE_EC3;
 	table_f[0][2][0][2][2][0] = SCORE_EL3;
@@ -158,6 +158,30 @@ int main(void){
 				table_f[a][b][2][2][2][c] += SCORE_EM;
 				table_f[a][b][c][1][1][1] += SCORE_AM;
 				table_f[a][b][c][2][2][2] += SCORE_EM;
+				table_f[1][0][1][a][b][c] += SCORE_AM;
+				table_f[2][0][2][a][b][c] += SCORE_EM;
+				table_f[a][1][0][1][b][c] += SCORE_AM;
+				table_f[a][2][0][2][b][c] += SCORE_EM;
+				table_f[a][b][1][0][1][c] += SCORE_AM;
+				table_f[a][b][2][0][2][c] += SCORE_EM;
+				table_f[a][b][c][1][0][1] += SCORE_AM;
+				table_f[a][b][c][2][0][2] += SCORE_EM;
+				table_f[0][1][1][a][b][c] += SCORE_AM;
+				table_f[0][2][2][a][b][c] += SCORE_EM;
+				table_f[a][0][1][1][b][c] += SCORE_AM;
+				table_f[a][0][2][2][b][c] += SCORE_EM;
+				table_f[a][b][0][1][1][c] += SCORE_AM;
+				table_f[a][b][0][2][2][c] += SCORE_EM;
+				table_f[a][b][c][0][1][1] += SCORE_AM;
+				table_f[a][b][c][0][2][2] += SCORE_EM;
+				table_f[1][1][0][a][b][c] += SCORE_AM;
+				table_f[2][2][0][a][b][c] += SCORE_EM;
+				table_f[a][1][1][0][b][c] += SCORE_AM;
+				table_f[a][2][2][0][b][c] += SCORE_EM;
+				table_f[a][b][1][1][0][c] += SCORE_AM;
+				table_f[a][b][2][2][0][c] += SCORE_EM;
+				table_f[a][b][c][1][1][0] += SCORE_AM;
+				table_f[a][b][c][2][2][0] += SCORE_EM;
 				for (d = 0; d < 4; d++){
 					table_f[1][1][a][b][c][d] += SCORE_AM;
 					table_f[2][2][a][b][c][d] += SCORE_EM;
