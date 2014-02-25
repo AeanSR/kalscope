@@ -68,7 +68,7 @@ char mainboard[16][16] = { 0 };
 char __declspec(thread) board[19][32] = { 0 };
 
 //Structure for evaluate lookup table.
-static int32_t table_f[4][4][4][4][4][4] = { 0 };
+#include "eval_gen\eval.inc"
 static int init_flag = 0;
 
 //Structure for result reduce.
@@ -322,7 +322,7 @@ char eval_win(){
 void init_table(){
 	if (init_flag) return;
 	init_flag++;
-	int a, b, c, d, e, f;
+	int a, b;
 	static std::mt19937_64 rng;
 	HASH_SIZE = memory_to_use() - 1;
 	hash_table = new hash_t[HASH_SIZE+1];
@@ -332,108 +332,6 @@ void init_table(){
 			zobrist[0][a][b] = rng();
 			zobrist[1][a][b] = rng();
 		}
-
-	for (a = 0; a < 4; a++)
-		for (b = 0; b < 4; b++)
-			for (c = 0; c < 4; c++){
-				table_f[1][1][1][a][b][c] += SCORE_AM;
-				table_f[2][2][2][a][b][c] += SCORE_EM;
-				table_f[a][1][1][1][b][c] += SCORE_AM;
-				table_f[a][2][2][2][b][c] += SCORE_EM;
-				table_f[a][b][1][1][1][c] += SCORE_AM;
-				table_f[a][b][2][2][2][c] += SCORE_EM;
-				table_f[a][b][c][1][1][1] += SCORE_AM;
-				table_f[a][b][c][2][2][2] += SCORE_EM;
-				for (d = 0; d < 4; d++){
-					table_f[1][1][a][b][c][d] += SCORE_AM;
-					table_f[2][2][a][b][c][d] += SCORE_EM;
-					table_f[a][1][1][b][c][d] += SCORE_AM;
-					table_f[a][2][2][b][c][d] += SCORE_EM;
-					table_f[a][b][1][1][c][d] += SCORE_AM;
-					table_f[a][b][2][2][c][d] += SCORE_EM;
-					table_f[a][b][c][1][1][d] += SCORE_AM;
-					table_f[a][b][c][2][2][d] += SCORE_EM;
-					table_f[a][b][c][d][1][1] += SCORE_AM;
-					table_f[a][b][c][d][2][2] += SCORE_EM;
-				}
-			}
-
-	table_f[0][1][1][1][1][3] = SCORE_AC4;
-	table_f[0][1][1][1][1][2] = SCORE_AC4;
-	table_f[0][1][1][1][1][0] = SCORE_AL4 * 2;
-	table_f[1][0][1][1][1][3] = SCORE_AC4;
-	table_f[1][0][1][1][1][2] = SCORE_AC4;
-	table_f[1][0][1][1][1][0] = SCORE_AL4;
-	table_f[1][1][0][1][1][3] = SCORE_AC4;
-	table_f[1][1][0][1][1][2] = SCORE_AC4;
-	table_f[1][1][0][1][1][0] = SCORE_AL4;
-	table_f[1][1][1][0][1][3] = SCORE_AC4;
-	table_f[1][1][1][0][1][2] = SCORE_AC4;
-	table_f[1][1][1][0][1][0] = SCORE_AL4;
-
-	table_f[0][2][2][2][2][3] = SCORE_EC4;
-	table_f[0][2][2][2][2][1] = SCORE_EC4;
-	table_f[0][2][2][2][2][0] = SCORE_EL4 * 2;
-	table_f[2][0][2][2][2][3] = SCORE_EC4;
-	table_f[2][0][2][2][2][1] = SCORE_EC4;
-	table_f[2][0][2][2][2][0] = SCORE_EL4;
-	table_f[2][2][0][2][2][3] = SCORE_EC4;
-	table_f[2][2][0][2][2][1] = SCORE_EC4;
-	table_f[2][2][0][2][2][0] = SCORE_EL4;
-	table_f[2][2][2][0][2][3] = SCORE_EC4;
-	table_f[2][2][2][0][2][1] = SCORE_EC4;
-	table_f[2][2][2][0][2][0] = SCORE_EL4;
-
-	table_f[0][0][1][1][1][0] = SCORE_AL3;
-	table_f[0][0][1][1][1][2] = SCORE_AC3;
-	table_f[0][0][1][1][1][3] = SCORE_AC3;
-	table_f[0][1][0][1][1][0] = SCORE_AL3;
-	table_f[0][1][0][1][1][2] = SCORE_AC3;
-	table_f[0][1][0][1][1][3] = SCORE_AC3;
-	table_f[0][1][1][0][1][0] = SCORE_AL3;
-	table_f[0][1][1][0][1][2] = SCORE_AC3;
-	table_f[0][1][1][0][1][3] = SCORE_AC3;
-
-	table_f[2][0][1][1][1][0] = SCORE_AC3 * 2;
-	table_f[2][1][0][1][1][0] = SCORE_AC3;
-	table_f[2][1][1][0][1][0] = SCORE_AC3;
-	table_f[3][0][1][1][1][0] = SCORE_AC3 * 2;
-	table_f[3][1][0][1][1][0] = SCORE_AC3;
-	table_f[3][1][1][0][1][0] = SCORE_AC3;
-
-	table_f[0][0][2][2][2][0] = SCORE_EL3;
-	table_f[0][0][2][2][2][1] = SCORE_EC3;
-	table_f[0][0][2][2][2][3] = SCORE_EC3;
-	table_f[0][2][0][2][2][0] = SCORE_EL3;
-	table_f[0][2][0][2][2][1] = SCORE_EC3;
-	table_f[0][2][0][2][2][3] = SCORE_EC3;
-	table_f[0][2][2][0][2][0] = SCORE_EL3;
-	table_f[0][2][2][0][2][1] = SCORE_EC3;
-	table_f[0][2][2][0][2][3] = SCORE_EC3;
-
-	table_f[1][0][2][2][2][0] = SCORE_EC3 * 2;
-	table_f[1][2][0][2][2][0] = SCORE_EC3;
-	table_f[1][2][2][0][2][0] = SCORE_EC3;
-	table_f[3][0][2][2][2][0] = SCORE_EC3 * 2;
-	table_f[3][2][0][2][2][0] = SCORE_EC3;
-	table_f[3][2][2][0][2][0] = SCORE_EC3;
-
-	for (a = 0; a < 4; a++)
-		for (b = 0; b < 4; b++)
-			for (c = 0; c < 4; c++)
-				for (d = 0; d < 4; d++)
-					for (e = 0; e < 4; e++)
-						for (f = 0; f < 4; f++){
-							int32_t t1 = table_f[a][b][c][d][e][f];
-							int32_t t2 = table_f[f][e][d][c][b][a];
-							if (abs32(t1) > abs32(t2)){
-								table_f[f][e][d][c][b][a] = t1;
-							}
-							else{
-								table_f[a][b][c][d][e][f] = t2;
-							}
-						}
-
 }
 
 int32_t eval_s(){
@@ -630,21 +528,13 @@ int32_t __fastcall alpha_beta(int32_t alpha, int32_t beta, int depth, int who2mo
 				return h->value;
 			else if (eval_stype(h) == TYPE_B)
 				alpha = max32(alpha, h->value);
-			else if (eval_stype(h) == TYPE_A)
-				beta = min32(beta, h->value);
-			if (alpha >= beta)
-				return h->value;
+			else if (eval_stype(h) == TYPE_A && h->value <= alpha)
+				return alpha;
 		}
 
 		// Call eval_w().
-		switch (eval_w(found ? h : NULL)){
-		case 1:
-			return who2move * (SCORE_WIN + depth);
-		case 2:
-			return who2move * (SCORE_LOSE + intelligence - depth);
-		default:
-			break;
-		}
+		if (eval_w(found ? h : NULL))
+			return alpha;
 
 		//Generate all moves and sort.
 		move_t mlist[225];

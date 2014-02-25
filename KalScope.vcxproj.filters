@@ -64,4 +64,9 @@
       <Filter>资源文件</Filter>
     </Image>
   </ItemGroup>
+  <ItemGroup>
+    <None Include="..\..\aeanswiftriver%40gmail.com\KalScope\eval_gen\eval.inc">
+      <Filter>源文件</Filter>
+    </None>
+  </ItemGroup>
 </Project>
