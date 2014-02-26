@@ -66,6 +66,11 @@ struct move_t{
 //Structure for board representation.
 char mainboard[16][16] = { 0 };
 char __declspec(thread) board[19][32] = { 0 };
+uint16_t __declspec(thread, align(16)) bitboard[2][16] = { 0 };
+uint16_t __declspec(thread, align(16)) bitboard_mc[16] = { 0 };
+uint16_t __declspec(thread, align(16)) bitboard_h[2][16] = { 0 };
+uint16_t __declspec(thread, align(16)) bitboard_d[2][32] = { 0 };
+uint16_t __declspec(thread, align(16)) bitboard_ad[2][32] = { 0 };
 
 //Structure for evaluate lookup table.
 #include "eval_gen\eval.inc"
@@ -117,8 +122,66 @@ size_t memory_to_use(){
 	return a > 0 ? a : HASH_SIZE_DEFAULT;
 }
 
-uint64_t zobrist_key(){
+void __forceinline bit_makemove(int x, int y, char color){
+	bitboard[color - 1][x] |= 1 << y;
+	bitboard_h[color - 1][y] |= 1 << x;
+	bitboard_d[color - 1][15 - x + y] |= 1 << (x);
+	bitboard_ad[color - 1][x + y] |= 1 << (15 - x);
+}
+void __forceinline bit_makemove(move_t& move, char color){
+	bit_makemove(move.x, move.y, color);
+}
+void __forceinline bit_unmakemove(int x, int y, char color){
+	bitboard[color - 1][x] &= ~(1 << y);
+	bitboard_h[color - 1][y] &= ~(1 << x);
+	bitboard_d[color - 1][15 - x + y] &= ~(1 << (x));
+	bitboard_ad[color - 1][x + y] &= ~(1 << (15 - x));
+}
+void __forceinline bit_unmakemove(move_t& move, char color){
+	bit_unmakemove(move.x, move.y, color);
+}
+
+void bit_copyboard(){
 	int x, y;
+	char b;
+	memset(bitboard[0], 0, sizeof(uint16_t)* 16);
+	memset(bitboard[1], 0, sizeof(uint16_t)* 16);
+	memset(bitboard_h[0], 0, sizeof(uint16_t)* 16);
+	memset(bitboard_h[1], 0, sizeof(uint16_t)* 16);
+	memset(bitboard_d[0], 0, sizeof(uint16_t)* 16);
+	memset(bitboard_d[1], 0, sizeof(uint16_t)* 16);
+	memset(bitboard_ad[0], 0, sizeof(uint16_t)* 16);
+	memset(bitboard_ad[1], 0, sizeof(uint16_t)* 16);
+	for (x = 0; x < 15; x++)
+		for (y = 0; y < 15; y++){
+			b = mainboard[x][y];
+			if (b){
+				bit_makemove(x, y, b);
+			}
+		}
+}
+
+void bit_cutidle(){
+	int x;
+	memset(bitboard_mc, 0, sizeof(uint16_t)* 16);
+	for (x = 1; x < 15; x++){
+		bitboard_mc[x] |= 0x7fff & (bitboard[0][x - 1] | (bitboard[0][x - 1] << 1) | (bitboard[0][x - 1] >> 1));
+		bitboard_mc[x] |= 0x7fff & (bitboard[1][x - 1] | (bitboard[1][x - 1] << 1) | (bitboard[1][x - 1] >> 1));
+	}
+	for (x = 0; x < 14; x++){
+		bitboard_mc[x] |= 0x7fff & (bitboard[0][x + 1] | (bitboard[0][x + 1] << 1) | (bitboard[0][x + 1] >> 1));
+		bitboard_mc[x] |= 0x7fff & (bitboard[1][x + 1] | (bitboard[1][x + 1] << 1) | (bitboard[1][x + 1] >> 1));
+	}
+	for (x = 0; x < 15; x++){
+		bitboard_mc[x] |= 0x7fff & (bitboard[0][x] << 1) | (bitboard[0][x] >> 1);
+		bitboard_mc[x] |= 0x7fff & (bitboard[1][x] << 1) | (bitboard[1][x] >> 1);
+		bitboard_mc[x] &= ~bitboard[0][x];
+		bitboard_mc[x] &= ~bitboard[1][x];
+	}
+}
+
+uint64_t zobrist_key(){
+	/*int x, y;
 	unsigned long c;
 	uint64_t z = 0;
 	static const __m128i xmm0 = _mm_setzero_si128();
@@ -134,6 +197,30 @@ uint64_t zobrist_key(){
 			z ^= zobrist[board[x][y] - 1][x][y];
 			mask >>= c + 1;
 			y++;
+		}
+	}
+	return z;*/
+	int x, y;
+	unsigned long c;
+	uint64_t z = 0;
+	for (x = 0; x < 15; x++){
+		y = 0;
+		unsigned long mask = bitboard[0][x];
+		while (mask){
+			_BitScanForward(&c, mask);
+			y += c;
+			z ^= zobrist[0][x][y];
+			mask >>= c + 1;
+			++y;
+		}
+		y = 0;
+		mask = bitboard[1][x];
+		while (mask){
+			_BitScanForward(&c, mask);
+			y += c;
+			z ^= zobrist[1][x][y];
+			mask >>= c + 1;
+			++y;
 		}
 	}
 	return z;
@@ -203,6 +290,7 @@ char eval_w(hash_t* h = NULL){
 		default: return type - 1;
 		}
 	}
+	/*
 	char result = 0;
 	int x, y;
 	unsigned long c;
@@ -246,6 +334,73 @@ char eval_w(hash_t* h = NULL){
 			if (result) goto evalw_return;
 			mask >>= c + 1;
 			y ++;
+		}
+	}*/
+	char result = 0;
+	int c;
+	__m128i xmm1, xmm2, xmm3, xmm4;
+	__m128i xmm0 = _mm_set1_epi16(0x1f);
+	__m128i xmm7 = _mm_setzero_si128();
+	for (c = 0; c < 2; c++){
+		xmm1 = _mm_load_si128((__m128i*)&bitboard[c][0]);
+		xmm3 = _mm_load_si128((__m128i*)&bitboard[c][8]);
+		while (0x7fff & ~_mm_movemask_epi8(_mm_cmpeq_epi16(xmm7, _mm_or_si128(xmm1, xmm3)))){
+			xmm2 = _mm_and_si128(xmm0, xmm1);
+			xmm4 = _mm_and_si128(xmm0, xmm3);
+			if (_mm_movemask_epi8(_mm_or_si128(_mm_cmpeq_epi16(xmm2, xmm0), _mm_cmpeq_epi16(xmm4, xmm0)))){
+				result = c + 1;
+				goto evalw_return;
+			}
+			xmm1 = _mm_srli_epi16(xmm1, 1);
+			xmm3 = _mm_srli_epi16(xmm3, 1);
+		}
+		xmm1 = _mm_load_si128((__m128i*)&bitboard_h[c][0]);
+		xmm3 = _mm_load_si128((__m128i*)&bitboard_h[c][8]);
+		while (0x7fff & ~_mm_movemask_epi8(_mm_cmpeq_epi16(xmm7, _mm_or_si128(xmm1, xmm3)))){
+			xmm2 = _mm_and_si128(xmm0, xmm1);
+			xmm4 = _mm_and_si128(xmm0, xmm3);
+			if (_mm_movemask_epi8(_mm_or_si128(_mm_cmpeq_epi16(xmm2, xmm0), _mm_cmpeq_epi16(xmm4, xmm0)))){
+				result = c + 1;
+				goto evalw_return;
+			}
+			xmm1 = _mm_srli_epi16(xmm1, 1);
+			xmm3 = _mm_srli_epi16(xmm3, 1);
+		}
+		xmm1 = _mm_loadu_si128((__m128i*)&bitboard_d[c][4]);
+		xmm3 = _mm_loadu_si128((__m128i*)&bitboard_ad[c][4]);
+		while (0x7fff & ~_mm_movemask_epi8(_mm_cmpeq_epi16(xmm7, _mm_or_si128(xmm1, xmm3)))){
+			xmm2 = _mm_and_si128(xmm0, xmm1);
+			xmm4 = _mm_and_si128(xmm0, xmm3);
+			if (_mm_movemask_epi8(_mm_or_si128(_mm_cmpeq_epi16(xmm2, xmm0), _mm_cmpeq_epi16(xmm4, xmm0)))){
+				result = c + 1;
+				goto evalw_return;
+			}
+			xmm1 = _mm_srli_epi16(xmm1, 1);
+			xmm3 = _mm_srli_epi16(xmm3, 1);
+		}
+		xmm1 = _mm_loadu_si128((__m128i*)&bitboard_d[c][12]);
+		xmm3 = _mm_loadu_si128((__m128i*)&bitboard_ad[c][12]);
+		while (0x7fff & ~_mm_movemask_epi8(_mm_cmpeq_epi16(xmm7, _mm_or_si128(xmm1, xmm3)))){
+			xmm2 = _mm_and_si128(xmm0, xmm1);
+			xmm4 = _mm_and_si128(xmm0, xmm3);
+			if (_mm_movemask_epi8(_mm_or_si128(_mm_cmpeq_epi16(xmm2, xmm0), _mm_cmpeq_epi16(xmm4, xmm0)))){
+				result = c + 1;
+				goto evalw_return;
+			}
+			xmm1 = _mm_srli_epi16(xmm1, 1);
+			xmm3 = _mm_srli_epi16(xmm3, 1);
+		}
+		xmm1 = _mm_loadu_si128((__m128i*)&bitboard_d[c][20]);
+		xmm3 = _mm_loadu_si128((__m128i*)&bitboard_ad[c][20]);
+		while (0x7fff & ~_mm_movemask_epi8(_mm_cmpeq_epi16(xmm7, _mm_or_si128(xmm1, xmm3)))){
+			xmm2 = _mm_and_si128(xmm0, xmm1);
+			xmm4 = _mm_and_si128(xmm0, xmm3);
+			if (_mm_movemask_epi8(_mm_or_si128(_mm_cmpeq_epi16(xmm2, xmm0), _mm_cmpeq_epi16(xmm4, xmm0)))){
+				result = c + 1;
+				goto evalw_return;
+			}
+			xmm1 = _mm_srli_epi16(xmm1, 1);
+			xmm3 = _mm_srli_epi16(xmm3, 1);
 		}
 	}
 evalw_return:
@@ -459,16 +614,21 @@ int move_gen(move_t* movelist, hash_t* h, int color, int depth){
 	int hx = 0xfe;
 	int hy = 0xfe;
 	int x, y;
+	unsigned long c, mask;
 	uint64_t k;
 	hash_t* p;
 	if (h->key == key && eval_stype(h) && h->x != 0xfe){
 		hx = h->x;
 		hy = h->y;
 	}
+	bit_cutidle();
 	if(depth >= 2){
-		for (x = 0; x < 15; x++)
-			for (y = 0; y < 15; y++){
-				if (idle(x, y)) continue;
+		for (x = 0; x < 15; x++){
+			y = 0;
+			mask = bitboard_mc[x];
+			while (mask){
+				_BitScanForward(&c, mask);
+				y += c;
 				if ((x ^ hx) | (y ^ hy)) {
 					k = key ^ zobrist[color - 1][x][y];
 					p = &hash_table[k & HASH_SIZE];
@@ -488,14 +648,19 @@ int move_gen(move_t* movelist, hash_t* h, int color, int depth){
 					movelist[count].y = y;
 					count++;
 				}
-
+				mask >>= c + 1;
+				y++;
 			}
+		}
 		move_sort(movelist, 0, count - 1);
 	}
 	else{
-		for (x = 0; x < 15; x++)
-			for (y = 0; y < 15; y++){
-				if (idle(x, y)) continue;
+		for (x = 0; x < 15; x++){
+			y = 0;
+			mask = bitboard_mc[x];
+			while(mask){
+				_BitScanForward(&c, mask);
+				y += c;
 				movelist[count].x = x;
 				movelist[count].y = y;
 				if ((x ^ hx) | (y ^ hy))
@@ -505,7 +670,10 @@ int move_gen(move_t* movelist, hash_t* h, int color, int depth){
 					movelist[0].swap(movelist[count]);
 				}
 				count++;
+				mask >>= c + 1;
+				y++;
 			}
+		}
 	}
 
 	return count;
@@ -513,12 +681,21 @@ int move_gen(move_t* movelist, hash_t* h, int color, int depth){
 
 int32_t __fastcall alpha_beta(int32_t alpha, int32_t beta, int depth, int who2move, int is_pv);
 
-int32_t fork_subthread(bool* ready, move_t move, char b[][32], uint64_t k,
-	int32_t alpha, int32_t beta, int depth, int who2move)
+int32_t fork_subthread(bool* ready, move_t move,
+	char b[][32], uint16_t bb[][16], uint16_t bbh[][16], uint16_t bbd[][32], uint16_t bbad[][32],
+	uint64_t k, int32_t alpha, int32_t beta, int depth, int who2move)
 {
 	// Copy board from main.
 	for (int i = 0; i < 15; i++)
 		memcpy(board[i], b[i], 16);
+	memcpy(bitboard[0], bb[0], 32);
+	memcpy(bitboard[1], bb[1], 32);
+	memcpy(bitboard_h[0], bbh[0], 32);
+	memcpy(bitboard_h[1], bbh[1], 32);
+	memcpy(bitboard_d[0], bbd[0], 64);
+	memcpy(bitboard_d[1], bbd[1], 64);
+	memcpy(bitboard_ad[0], bbad[0], 64);
+	memcpy(bitboard_ad[1], bbad[1], 64);
 	*ready = 1;
 
 	// Set up.
@@ -530,6 +707,7 @@ int32_t fork_subthread(bool* ready, move_t move, char b[][32], uint64_t k,
 
 	// Make move.
 	board[x][y] = color;
+	bit_makemove(x, y, color);
 	key ^= zobrist[color - 1][x][y];
 
 	// Search.
@@ -597,7 +775,7 @@ int32_t __fastcall alpha_beta(int32_t alpha, int32_t beta, int depth, int who2mo
 					ltclock.unlock();
 					bool ready = 0;
 					forked_return[forked_move] = std::async(
-						fork_subthread, &ready, mlist[i], board, key,
+						fork_subthread, &ready, mlist[i], board, bitboard, bitboard_h, bitboard_d, bitboard_ad, key,
 						alpha, beta, depth, who2move);
 					forked_move++;
 
@@ -611,6 +789,7 @@ int32_t __fastcall alpha_beta(int32_t alpha, int32_t beta, int depth, int who2mo
 
 			// Make move.
 			board[x][y] = color;
+			bit_makemove(x, y, color);
 			key ^= zobrist[color - 1][x][y];
 
 			// Do principle variation search.
@@ -625,6 +804,7 @@ int32_t __fastcall alpha_beta(int32_t alpha, int32_t beta, int depth, int who2mo
 			}
 
 			board[x][y] = 0;
+			bit_unmakemove(x, y, color);
 			key ^= zobrist[color - 1][x][y];
 			if (reg >= beta){
 				record_hash(beta, x, y, TYPE_B, depth);
@@ -695,12 +875,14 @@ void pushmove(int _x, int _y, int32_t score){
 
 void thread_body(int maxdepth){
 	COPYBOARD();
+	bit_copyboard();
 	int x, y;
 	int32_t localm;
 	int32_t reg;
 	move_t* mp;
 	while (getmove(x, y, &mp)){
 		board[x][y] = 1;
+		bit_makemove(x, y, 1);
 		key = zobrist_key();
 		tlock.lock();
 		localm = m;
@@ -723,6 +905,7 @@ void thread_body(int maxdepth){
 		}
 		tlock.unlock();
 		board[x][y] = 0;
+		bit_unmakemove(x, y, 1);
 	}
 
 }
@@ -738,6 +921,7 @@ void ai_run(){
 	int bx = 0xfe;
 	int by = 0xfe;
 	COPYBOARD();
+	bit_copyboard();
 
 	// Probe TT.
 	uint64_t k = zobrist_key();
@@ -780,10 +964,12 @@ void ai_run(){
 		mx = x;
 		my = y;
 		board[x][y] = 1;
+		bit_makemove(x, y, 1);
 		key ^= zobrist[0][x][y];
 		ltc++;
 		m = -alpha_beta(-SCORE_WIN, -SCORE_LOSE, maxdepth, -1, 1);
 		board[x][y] = 0;
+		bit_unmakemove(x, y, 1);
 		key ^= zobrist[0][x][y];
 
 		// Young brother start.
