@@ -223,31 +223,30 @@ int main(void){
 		"\tSEE eval_gen\\eval_gen.cpp FOR IMPLEMENT DETAILS.\n"
 		"*/\n\n"
 		"#pragma once\n"
-		"static const int32_t table_f[4][4][4][4][4][4] = {\n",
+		"static const int32_t table_f[32][32][4] = {\n",
 		asctime (timeinfo)
 		);
-	for (a = 0; a < 4; a++){
-		for (b = 0; b < 4; b++){
-			for (c = 0; c < 4; c++){
-				for (d = 0; d < 4; d++){
-					for (e = 0; e < 4; e++){
-						fprintf(out, "\t/*");
-						for (f = 0; f < 4; f++){
-							fprintf(out, "    %d-%d-%d-%d-%d-%d,", a, b, c, d, e, f);
-						}
-						fprintf(out, "*/\n\t  ");
-						for (f = 0; f < 4; f++)
-						{
-							int32_t t1 = table_f[a][b][c][d][e][f];
-							printf( "%d%d%d%d%d%d: %8x\n", a, b, c, d, e, f, t1 );
-							fprintf(out, "     0x%08X,", t1);
-						}
-						fprintf(out, "\n\n");
-					}
-				}
-			}
-		}
-	}
+    for (int ally = 0; ally<32; ally++)
+        for (int oppo = 0; oppo<32; oppo++){
+            a = ally & (1 << 4) ? 1 : ( oppo & (1 << 4) ? 2 : 0 );
+            b = ally & (1 << 3) ? 1 : ( oppo & (1 << 3) ? 2 : 0 );
+            c = ally & (1 << 2) ? 1 : ( oppo & (1 << 2) ? 2 : 0 );
+            d = ally & (1 << 1) ? 1 : ( oppo & (1 << 1) ? 2 : 0 );
+            e = ally & (1 << 0) ? 1 : ( oppo & (1 << 0) ? 2 : 0 );
+            fprintf(out, "%s", oppo & ally ? "/* NOT LEGAL: */\n" : "\n" );
+            fprintf(out, "\t/*");
+            for (f = 0; f < 4; f++){
+                fprintf(out, "    %d-%d-%d-%d-%d-%d,", a, b, c, d, e, f);
+            }
+            fprintf(out, "*/\n\t  ");
+            for (f = 0; f < 4; f++)
+            {
+                int32_t t1 = table_f[a][b][c][d][e][f];
+                printf( "%d%d%d%d%d%d: %8x\n", a, b, c, d, e, f, t1 );
+                fprintf(out, "     0x%08X,", t1);
+            }
+            fprintf(out, "\n\n");
+        }
 	fprintf(out, "};\n");
     fclose(out);
     return 0;
