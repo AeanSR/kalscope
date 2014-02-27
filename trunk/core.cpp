@@ -12,7 +12,7 @@
 static const char codename_str[] = "AI Core Module \"Shadowglen\" 2014Feb.";
 
 /* Search Depth. This macro is equal to max depth minus 1.  */
-#define intelligence 6
+#define intelligence 5
 
 //Some branch-less macros.
 #define sshr32(v,d) (-(int32_t)((uint32_t)(v) >> d))
@@ -65,7 +65,6 @@ struct move_t{
 
 //Structure for board representation.
 char mainboard[16][16] = { 0 };
-char __declspec(thread) board[19][32] = { 0 };
 uint16_t __declspec(thread, align(16)) bitboard[2][16] = { 0 };
 uint16_t __declspec(thread, align(16)) bitboard_mc[16] = { 0 };
 uint16_t __declspec(thread, align(16)) bitboard_h[2][16] = { 0 };
@@ -181,46 +180,23 @@ void bit_cutidle(){
 }
 
 uint64_t zobrist_key(){
-	/*int x, y;
-	unsigned long c;
-	uint64_t z = 0;
-	static const __m128i xmm0 = _mm_setzero_si128();
-	static const __m128i xmm2 = _mm_set1_epi32(0xff);
-	for (x = 0; x < 15; x++){
-		y = 0;
-		__m128i xmm1 = _mm_loadu_si128((__m128i*)board[x]);
-		unsigned int mask = _mm_movemask_epi8(_mm_cmpeq_epi8(xmm0, xmm1));
-		mask = (~mask) & 0x7fff;
-		while (mask){
-			_BitScanForward(&c, mask);
-			y += c;
-			z ^= zobrist[board[x][y] - 1][x][y];
-			mask >>= c + 1;
-			y++;
-		}
-	}
-	return z;*/
 	int x, y;
 	unsigned long c;
 	uint64_t z = 0;
 	for (x = 0; x < 15; x++){
-		y = 0;
 		unsigned long mask = bitboard[0][x];
 		while (mask){
 			_BitScanForward(&c, mask);
-			y += c;
+			y = c;
 			z ^= zobrist[0][x][y];
-			mask >>= c + 1;
-			++y;
+			mask &= mask - 1;
 		}
-		y = 0;
 		mask = bitboard[1][x];
 		while (mask){
 			_BitScanForward(&c, mask);
-			y += c;
+			y = c;
 			z ^= zobrist[1][x][y];
-			mask >>= c + 1;
-			++y;
+			mask &= mask - 1;
 		}
 	}
 	return z;
@@ -240,27 +216,6 @@ void __fastcall record_hash(int32_t score, int x = 0xfe, int y = 0xfe, int type 
 	p->type = (p->type & 0xf0) | type;
 	p->depth = depth;
 	hlock[key % 1024].unlock();
-}
-
-char __forceinline idle(int x, int y){
-	if (board[x][y] > 0) return 1;
-	int lx = x > 0 ? x - 1 : x;
-	int rx = x + 1;
-	int ty = y > 0 ? y - 1 : y;
-	int by = y + 1;
-	char a = board[lx][ty];
-	char b = board[lx][y];
-	char c = board[lx][by];
-	char d = board[x][ty];
-	a |= board[x][by];
-	b |= board[rx][ty];
-	c |= board[rx][y];
-	d |= board[rx][by];
-	a |= b;
-	c |= d;
-	a |= c;
-	a = (unsigned char)(-a) >> 7;
-	return a - 1;
 }
 
 char __forceinline mainidle(int x, int y){
@@ -290,52 +245,6 @@ char eval_w(hash_t* h = NULL){
 		default: return type - 1;
 		}
 	}
-	/*
-	char result = 0;
-	int x, y;
-	unsigned long c;
-	static const __m128i xmm0 = _mm_setzero_si128();
-	static const __m128i xmm2 = _mm_set1_epi32(0xff);
-	for (x = 0; x < 15; x++){
-		y = 0;
-		__m128i xmm1 = _mm_loadu_si128((__m128i*)board[x]);
-		unsigned int mask = _mm_movemask_epi8(_mm_cmpeq_epi8(xmm0, xmm1));
-		mask = (~mask) & 0x7fff;
-		while (mask){
-			_BitScanForward(&c, mask);
-			y += c;
-			int xm4, xm3, xm2, xm1;
-			if (x >> 2){
-				xm4 = x - 4;
-				xm3 = x - 3;
-				xm2 = x - 2;
-				xm1 = x - 1;
-			}
-			else{
-				xm4 = x;
-				xm3 = x;
-				xm2 = x;
-				xm1 = x;
-			}
-			__declspec(align(16)) char cache[] = {
-				board[xm4  ][y + 4], board[xm3  ][y + 3], board[xm2  ][y + 2], board[xm1  ][y + 1],
-				board[x    ][y + 1], board[x    ][y + 2], board[x    ][y + 3], board[x    ][y + 4],
-				board[x + 1][y    ], board[x + 2][y    ], board[x + 3][y    ], board[x + 4][y    ],
-				board[x + 1][y + 1], board[x + 2][y + 2], board[x + 3][y + 3], board[x + 4][y + 4],
-
-			};
-			xmm1 = _mm_load_si128((__m128i*)cache);
-			xmm1 = _mm_and_si128(_mm_srli_epi32(xmm1, 16), xmm1);
-			xmm1 = _mm_and_si128(_mm_srli_epi32(xmm1,  8), xmm1);
-			xmm1 = _mm_and_si128(xmm2, xmm1);
-			xmm1 =  _mm_or_si128(_mm_srli_si128(xmm1, 8), xmm1);
-			xmm1 =  _mm_or_si128(_mm_srli_si128(xmm1, 4), xmm1);
-			result = board[x][y] & _mm_extract_epi16(xmm1, 0);
-			if (result) goto evalw_return;
-			mask >>= c + 1;
-			y ++;
-		}
-	}*/
 	char result = 0;
 	int c;
 	__m128i xmm1, xmm2, xmm3, xmm4;
@@ -498,83 +407,76 @@ int32_t eval_s(){
 	case 2: return SCORE_LOSE;
 	default: break;
 	}
-	int x, y;
+	
+	int x, y, barrier;
 	unsigned long c;
 	static const __m128i xmm0 = _mm_setzero_si128();
 	int32_t score = SCORE_BASE;
+	long maska;
+	long masko;
+	unsigned long mask;
 	for (x = 0; x < 15; x++){
-		y = 0;
-		__m128i xmm1 = _mm_loadu_si128((__m128i*)board[x]);
-		unsigned int mask = _mm_movemask_epi8(_mm_cmpeq_epi8(xmm0, xmm1));
-		mask = (~mask) & 0x7fff;
+		maska = bitboard[0][x];
+		masko = bitboard[1][x];
+		mask = maska | masko;
 		while (mask){
 			_BitScanForward(&c, mask);
-			y += c;
-			if (y < 11){
-				score += table_f[board[x][y + 4]]
-					[board[x][y + 3]]
-				[board[x][y + 2]]
-				[board[x][y + 1]]
-				[board[x][y]]
-				[(y == 0) ? 3 : board[x][y - 1]];
-				if (x > 3){
-					score += table_f[board[x - 4][y + 4]]
-						[board[x - 3][y + 3]]
-					[board[x - 2][y + 2]]
-					[board[x - 1][y + 1]]
-					[board[x][y]]
-					[(y == 0 || x == 14) ? 3 : board[x + 1][y - 1]];
-				}
-
-			}
-			else if (y < 12){
-				score += table_f[3]
-					[board[x][y + 3]]
-				[board[x][y + 2]]
-				[board[x][y + 1]]
-				[board[x][y]]
-				[(y == 0) ? 3 : board[x][y - 1]];
-				if (x > 3){
-					score += table_f[3]
-						[board[x - 3][y + 3]]
-					[board[x - 2][y + 2]]
-					[board[x - 1][y + 1]]
-					[board[x][y]]
-					[(y == 0 || x == 14) ? 3 : board[x + 1][y - 1]];
-				}
-			}
-			if (x < 11){
-				score += table_f[board[x + 4][y]]
-					[board[x + 3][y]]
-				[board[x + 2][y]]
-				[board[x + 1][y]]
-				[board[x][y]][(x == 0) ? 3 : board[x - 1][y]];
-				if (y < 11){
-					score += table_f[board[x + 4][y + 4]]
-						[board[x + 3][y + 3]]
-					[board[x + 2][y + 2]]
-					[board[x + 1][y + 1]]
-					[board[x][y]]
-					[(y == 0 || x == 0) ? 3 : board[x - 1][y - 1]];
-				}
-			}
-			else if (x < 12){
-				score += table_f[3]
-					[board[x + 3][y]]
-				[board[x + 2][y]]
-				[board[x + 1][y]]
-				[board[x][y]][(x == 0) ? 3 : board[x - 1][y]];
-				if (y < 12){
-					score += table_f[3]
-						[board[x + 3][y + 3]]
-					[board[x + 2][y + 2]]
-					[board[x + 1][y + 1]]
-					[board[x][y]]
-					[(y == 0 || x == 0) ? 3 : board[x - 1][y - 1]];
-				}
-			}
-			mask >>= c + 1;
-			y++;
+			y = c;
+			if (y>10)
+				break;
+			if (y > 0)
+				barrier = ((maska >> (y - 1)) & 1) | ((masko >> (y - 2)) & 2);// _bittest(&maska, y - 1) ? 1 : (_bittest(&masko, y - 1) ? 2 : 0);
+			else
+				barrier = 3;
+			score += table_f[(maska >> y) & 31][(masko >> y) & 31][barrier];
+			mask &= mask - 1;
+		}
+		maska = bitboard_h[0][x];
+		masko = bitboard_h[1][x];
+		mask = maska | masko;
+		while (mask){
+			_BitScanForward(&c, mask);
+			y = c;
+			if (y > 10)
+				break;
+			if (y > 0)
+				barrier = ((maska >> (y - 1)) & 1) | ((masko >> (y - 2)) & 2);// _bittest(&maska, y - 1) ? 1 : (_bittest(&masko, y - 1) ? 2 : 0);
+			else
+				barrier = 3;
+			score += table_f[(maska >> y) & 31][(masko >> y) & 31][barrier];
+			mask &= mask - 1;
+		}
+	}
+	for (x = 4; x < 26; x++){
+		maska = bitboard_d[0][x];
+		masko = bitboard_d[1][x];
+		mask = maska | masko;
+		while (mask){
+			_BitScanForward(&c, mask);
+			y = c;
+			if (y > 24 - x || y > 10)
+				break;
+			if (y > 14 - x && y > 0)
+				barrier = ((maska >> (y - 1)) & 1) | ((masko >> (y - 2)) & 2);//_bittest(&maska, y - 1) ? 1 : (_bittest(&masko, y - 1) ? 2 : 0);
+			else
+				barrier = 3;
+			score += table_f[(maska >> y) & 31][(masko >> y) & 31][barrier];
+			mask &= mask - 1;
+		}
+		maska = bitboard_ad[0][x];
+		masko = bitboard_ad[1][x];
+		mask = maska | masko;
+		while (mask){
+			_BitScanForward(&c, mask);
+			y = c;
+			if (y > x - 4 || y > 10)
+				break;
+			if (y > x - 14 && y > 0)
+				barrier = ((maska >> (y - 1)) & 1) | ((masko >> (y - 2)) & 2);
+			else
+				barrier = 3;
+			score += table_f[(maska >> y) & 31][(masko >> y) & 31][barrier];
+			mask &= mask - 1;
 		}
 	}
 	return score;
@@ -609,6 +511,8 @@ void __fastcall move_sort(move_t* movelist, int first, int last){
 	}
 }
 
+int32_t __fastcall alpha_beta(int32_t alpha, int32_t beta, int depth, int who2move, int is_pv);
+
 int move_gen(move_t* movelist, hash_t* h, int color, int depth){
 	int count = 0;
 	int hx = 0xfe;
@@ -624,11 +528,10 @@ int move_gen(move_t* movelist, hash_t* h, int color, int depth){
 	bit_cutidle();
 	if(depth >= 2){
 		for (x = 0; x < 15; x++){
-			y = 0;
 			mask = bitboard_mc[x];
 			while (mask){
 				_BitScanForward(&c, mask);
-				y += c;
+				y = c;
 				if ((x ^ hx) | (y ^ hy)) {
 					k = key ^ zobrist[color - 1][x][y];
 					p = &hash_table[k & HASH_SIZE];
@@ -648,19 +551,17 @@ int move_gen(move_t* movelist, hash_t* h, int color, int depth){
 					movelist[count].y = y;
 					count++;
 				}
-				mask >>= c + 1;
-				y++;
+				mask &= mask - 1;
 			}
 		}
 		move_sort(movelist, 0, count - 1);
 	}
 	else{
 		for (x = 0; x < 15; x++){
-			y = 0;
 			mask = bitboard_mc[x];
 			while(mask){
 				_BitScanForward(&c, mask);
-				y += c;
+				y = c;
 				movelist[count].x = x;
 				movelist[count].y = y;
 				if ((x ^ hx) | (y ^ hy))
@@ -670,8 +571,7 @@ int move_gen(move_t* movelist, hash_t* h, int color, int depth){
 					movelist[0].swap(movelist[count]);
 				}
 				count++;
-				mask >>= c + 1;
-				y++;
+				mask &= mask - 1;
 			}
 		}
 	}
@@ -679,15 +579,11 @@ int move_gen(move_t* movelist, hash_t* h, int color, int depth){
 	return count;
 }
 
-int32_t __fastcall alpha_beta(int32_t alpha, int32_t beta, int depth, int who2move, int is_pv);
-
 int32_t fork_subthread(bool* ready, move_t move,
-	char b[][32], uint16_t bb[][16], uint16_t bbh[][16], uint16_t bbd[][32], uint16_t bbad[][32],
+	uint16_t bb[][16], uint16_t bbh[][16], uint16_t bbd[][32], uint16_t bbad[][32],
 	uint64_t k, int32_t alpha, int32_t beta, int depth, int who2move)
 {
 	// Copy board from main.
-	for (int i = 0; i < 15; i++)
-		memcpy(board[i], b[i], 16);
 	memcpy(bitboard[0], bb[0], 32);
 	memcpy(bitboard[1], bb[1], 32);
 	memcpy(bitboard_h[0], bbh[0], 32);
@@ -706,7 +602,6 @@ int32_t fork_subthread(bool* ready, move_t move,
 	int y = move.y;
 
 	// Make move.
-	board[x][y] = color;
 	bit_makemove(x, y, color);
 	key ^= zobrist[color - 1][x][y];
 
@@ -714,7 +609,6 @@ int32_t fork_subthread(bool* ready, move_t move,
 	reg = -alpha_beta(-alpha - 1, -alpha, depth - 1, -who2move, 0);
 	if (reg > alpha && reg < beta)
 		reg = -alpha_beta(-beta, -alpha, depth - 1, -who2move, 1);
-
 
 	// Ready to return, decrease ltc.
 	ltclock.lock();
@@ -758,7 +652,7 @@ int32_t __fastcall alpha_beta(int32_t alpha, int32_t beta, int depth, int who2mo
 
 		// Fork sub threads when appropriate.
 		int forked_move = 0;
-		std::future<int32_t> forked_return[4];
+		std::future<int32_t> forked_return[16];
 
 		// Search all moves.
 		for (int i = 0; i < count; i++)
@@ -768,14 +662,14 @@ int32_t __fastcall alpha_beta(int32_t alpha, int32_t beta, int depth, int who2mo
 
 			// If there's an idle CPU, try fork a sub thread.
 			// Only fork PV node, and alpha must be raised once.
-			if (is_pv && alpha_raised && depth > 3 && forked_move < 4 && ltc < ccpu){
+			if (is_pv && alpha_raised && depth > 3 && forked_move < 16 && ltc < ccpu){
 				ltclock.lock();
 				if (ltc < ccpu){
 					ltc++;
 					ltclock.unlock();
 					bool ready = 0;
 					forked_return[forked_move] = std::async(
-						fork_subthread, &ready, mlist[i], board, bitboard, bitboard_h, bitboard_d, bitboard_ad, key,
+						fork_subthread, &ready, mlist[i], bitboard, bitboard_h, bitboard_d, bitboard_ad, key,
 						alpha, beta, depth, who2move);
 					forked_move++;
 
@@ -788,7 +682,6 @@ int32_t __fastcall alpha_beta(int32_t alpha, int32_t beta, int depth, int who2mo
 			}
 
 			// Make move.
-			board[x][y] = color;
 			bit_makemove(x, y, color);
 			key ^= zobrist[color - 1][x][y];
 
@@ -803,7 +696,6 @@ int32_t __fastcall alpha_beta(int32_t alpha, int32_t beta, int depth, int who2mo
 					reg = -alpha_beta(-beta, -alpha, depth - 1, -who2move, 1);
 			}
 
-			board[x][y] = 0;
 			bit_unmakemove(x, y, color);
 			key ^= zobrist[color - 1][x][y];
 			if (reg >= beta){
@@ -846,9 +738,6 @@ int32_t __fastcall alpha_beta(int32_t alpha, int32_t beta, int depth, int who2mo
 	}
 }
 
-#define CPY(v) memcpy(board[(v)],mainboard[(v)],16)
-#define DCPY(v) CPY(v);CPY((v)+1);CPY((v)+2);CPY((v)+3)
-#define COPYBOARD() DCPY(0);DCPY(4);DCPY(8);DCPY(12)
 move_t msa[225];
 int msp;
 std::mutex msl;
@@ -874,14 +763,12 @@ void pushmove(int _x, int _y, int32_t score){
 }
 
 void thread_body(int maxdepth){
-	COPYBOARD();
 	bit_copyboard();
 	int x, y;
 	int32_t localm;
 	int32_t reg;
 	move_t* mp;
 	while (getmove(x, y, &mp)){
-		board[x][y] = 1;
 		bit_makemove(x, y, 1);
 		key = zobrist_key();
 		tlock.lock();
@@ -904,7 +791,6 @@ void thread_body(int maxdepth){
 			my = y;
 		}
 		tlock.unlock();
-		board[x][y] = 0;
 		bit_unmakemove(x, y, 1);
 	}
 
@@ -920,7 +806,6 @@ void ai_run(){
 	int mvcount = 0;
 	int bx = 0xfe;
 	int by = 0xfe;
-	COPYBOARD();
 	bit_copyboard();
 
 	// Probe TT.
@@ -935,7 +820,32 @@ void ai_run(){
 		}
 	}
 
+	// See if we are in check.
+	bit_cutidle();
+	unsigned long c;
+	for (x = 0; x < 15; x++){
+		unsigned long mask = bitboard_mc[x];
+		while (mask){
+			_BitScanForward(&c, mask);
+			y = c;
+			bit_makemove(x, y, 1);
+			if (eval_w()){
+				mainboard[x][y] = 1;
+				return;
+			}
+			bit_unmakemove(x, y, 1);
+			bit_makemove(x, y, 2);
+			if (eval_w()){
+				pushmove(x, y, INT32_MIN);
+				mvcount++;
+			}
+			bit_unmakemove(x, y, 2);
+			mask &= mask - 1;
+		}
+	}
+
 	// Generate all moves.
+	if (mvcount == 0)
 	for (x = 0; x < 15; x++)
 		for (y = 0; y < 15; y++){
 			if (mainidle(x, y)) continue;
@@ -963,12 +873,10 @@ void ai_run(){
 			return;
 		mx = x;
 		my = y;
-		board[x][y] = 1;
 		bit_makemove(x, y, 1);
 		key ^= zobrist[0][x][y];
 		ltc++;
 		m = -alpha_beta(-SCORE_WIN, -SCORE_LOSE, maxdepth, -1, 1);
-		board[x][y] = 0;
 		bit_unmakemove(x, y, 1);
 		key ^= zobrist[0][x][y];
 
