@@ -11,7 +11,10 @@ char eval_win();
 char eval_draw();
 char eval_null();
 void ai_run();
+void init_table();
 void paint_board(HWND hWnd);
 void clear_board(HWND hWnd);
 
 extern const char codename_str[];
+extern char* init_str;
+extern int init_finished;

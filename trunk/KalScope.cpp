@@ -8,7 +8,8 @@
 
 // 全局变量: 
 ULONG_PTR           gdiplusToken;
-HWND ghDlg;
+HWND ghDlg, ghWnd;
+int gnCmdShow;
 HINSTANCE hInst;								// 当前实例
 TCHAR szTitle[MAX_LOADSTRING];					// 标题栏文本
 TCHAR szWindowClass[MAX_LOADSTRING];			// 主窗口类名
@@ -34,6 +35,9 @@ int APIENTRY _tWinMain(_In_ HINSTANCE hInstance,
 	UNREFERENCED_PARAMETER(lpCmdLine);
 	ghDlg = CreateDialog(hInstance, MAKEINTRESOURCE(IDD_SPLASH), 0, Splash);
 	ShowWindow(ghDlg, SW_SHOW);
+
+	std::thread* t = new std::thread(init_table);
+	t->detach();
 	
 	// TODO:  在此放置代码。
 	MSG msg;
@@ -116,8 +120,8 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
    {
       return FALSE;
    }
-   ShowWindow(hWnd, nCmdShow);
-   UpdateWindow(hWnd);
+   ghWnd = hWnd;
+   gnCmdShow = nCmdShow;
 
    return TRUE;
 }
@@ -232,6 +236,68 @@ INT_PTR CALLBACK About(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
 
 BLENDFUNCTION    m_Blend;
 size_t splashcount=0;
+
+void drawsplash(HWND hDlg, char* str){
+	m_Blend.BlendOp = AC_SRC_OVER; //theonlyBlendOpdefinedinWindows2000
+	m_Blend.BlendFlags = 0; //nothingelseisspecial...
+	m_Blend.AlphaFormat = AC_SRC_ALPHA; //...
+	m_Blend.SourceConstantAlpha = 255;//AC_SRC_ALPHA 
+	static Image *m_pImageBack;
+	if(!m_pImageBack) ImageFromIDResource(IDB_PNG1, L"PNG", m_pImageBack);
+	//----绘制
+	PAINTSTRUCT ps;
+	HDC hdcTemp = BeginPaint(hDlg, &ps);
+	HDC hMemDC = CreateCompatibleDC(hdcTemp);
+	RECT rct;
+	GetWindowRect(hDlg, &rct);
+	HBITMAP hBitMap = CreateCompatibleBitmap(hdcTemp, rct.right - rct.left, rct.bottom - rct.top);
+	HBITMAP hBmpOld = (HBITMAP)SelectObject(hMemDC, hBitMap);
+	HDC hdcScreen = GetDC(hDlg);
+
+	POINT ptWinPos = { rct.left, rct.top };
+
+	Graphics imageGraphics(hMemDC);
+	Point points[] = { Point(0, 0),
+		Point(400, 0),
+		Point(0, 255) };
+	Point points2[] = { Point(50, 50),
+		Point(450, 50),
+		Point(50, 305) };
+
+	// 设置层次窗口
+	DWORD dwExStyle = GetWindowLong(hDlg, GWL_EXSTYLE);
+
+	if ((dwExStyle & 0x80000) != 0x80000){
+		SetWindowLong(hDlg, GWL_EXSTYLE, dwExStyle ^ 0x80000);
+	}
+
+	POINT    ptSrc = { 0, 0 };
+	SIZE    sizeWindow = { rct.right - rct.left, rct.bottom - rct.top };
+
+	// 完成透明不规则窗口的绘制
+	imageGraphics.DrawImage(m_pImageBack, points, 3);
+
+	WCHAR* drawString = (WCHAR*)calloc(256, sizeof(WCHAR));
+	MultiByteToWideChar(CP_ACP, 0, str, (int)strlen(str), drawString, 255);
+
+	// Create font and brush.
+	Font* drawFont = new Font(L"Tahoma", 8);
+	SolidBrush* drawBrush = new SolidBrush(Color::White);
+
+	// Create point for upper-left corner of drawing.
+	PointF drawPoint = PointF(210.0F, 240.0F);
+
+	// Draw string to screen.
+	imageGraphics.DrawString(drawString, -1, drawFont, drawPoint, drawBrush);
+
+	delete drawFont;
+	delete drawBrush;
+
+	UpdateLayeredWindow(hDlg, hdcScreen, &ptWinPos, &sizeWindow, hMemDC, &ptSrc, 255, &m_Blend, ULW_ALPHA);
+
+	// 释放空间
+	EndPaint(hDlg, &ps);
+}
 // Splash消息处理程序。
 INT_PTR CALLBACK Splash(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
 {
@@ -239,66 +305,30 @@ INT_PTR CALLBACK Splash(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
 	switch (message)
 	{
 	case WM_INITDIALOG:
-	{SetTimer(hDlg, 1, 1000, NULL);
-		m_Blend.BlendOp = AC_SRC_OVER; //theonlyBlendOpdefinedinWindows2000
-		m_Blend.BlendFlags = 0; //nothingelseisspecial...
-		m_Blend.AlphaFormat = AC_SRC_ALPHA; //...
-		m_Blend.SourceConstantAlpha = 255;//AC_SRC_ALPHA 
-		Image *m_pImageBack;
-		ImageFromIDResource(IDB_PNG1, L"PNG", m_pImageBack);
-		//----绘制
-		PAINTSTRUCT ps;
-		HDC hdcTemp = BeginPaint(hDlg, &ps);
-		HDC hMemDC = CreateCompatibleDC(hdcTemp);
-		RECT rct;
-		GetWindowRect(hDlg, &rct);
-		HBITMAP hBitMap = CreateCompatibleBitmap(hdcTemp, rct.right - rct.left, rct.bottom - rct.top);
-		SelectObject(hMemDC, hBitMap);
-		HDC hdcScreen = GetDC(hDlg);
-
-		POINT ptWinPos = { rct.left, rct.top };
-
-		Graphics imageGraphics(hMemDC);
-		Point points[] = { Point(0, 0),
-			Point(400, 0),
-			Point(0, 255) };
-
-		// 设置层次窗口
-		DWORD dwExStyle = GetWindowLong(hDlg, GWL_EXSTYLE);
-
-		if ((dwExStyle & 0x80000) != 0x80000){
-			SetWindowLong(hDlg, GWL_EXSTYLE, dwExStyle ^ 0x80000);
-		}
-
-		POINT    ptSrc = { 0, 0 };
-		SIZE    sizeWindow = { rct.right - rct.left, rct.bottom - rct.top };
-
-		// 完成透明不规则窗口的绘制
-		imageGraphics.DrawImage(m_pImageBack, points, 3);
-		UpdateLayeredWindow(hDlg, hdcScreen, &ptWinPos, &sizeWindow, hMemDC, &ptSrc, 255, &m_Blend, ULW_ALPHA);
-
-
-		// 释放空间
-		imageGraphics.ReleaseHDC(hMemDC);
-		DeleteObject(hBitMap);
-		DeleteDC(hMemDC);
-		hMemDC = NULL;
-		hdcScreen = NULL;
-		EndPaint(hDlg, &ps);
-		return (INT_PTR)TRUE;
-	}
-	
+		SetTimer(hDlg, 1, 60, NULL);
+		drawsplash(hDlg, "  ");
 		return (INT_PTR)TRUE;
 
 	case WM_PAINT:
 		return (INT_PTR)TRUE;
 	case WM_TIMER:
-		KillTimer(hDlg, 1);
-		if (splashcount++ == 0)DestroyWindow(hDlg);
+		if (splashcount == 0){
+			drawsplash(hDlg, init_str);
+			if (init_finished){
+				splashcount++;
+				KillTimer(hDlg, 1);
+				ShowWindow(ghWnd, gnCmdShow);
+				UpdateWindow(ghWnd);
+				DestroyWindow(hDlg);
+			}
+		}
+		else KillTimer(hDlg, 1);
 		return (INT_PTR)TRUE;
 	case WM_LBUTTONDOWN:
-		KillTimer(hDlg, 1);
-		if (splashcount++ > 0)DestroyWindow(hDlg);
+		if (splashcount > 0){
+			KillTimer(hDlg, 1);
+			DestroyWindow(hDlg);
+		}
 		return (INT_PTR)TRUE;
 
 	}
