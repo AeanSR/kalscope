@@ -29,5 +29,8 @@
 #include <future>
 #include <random>
 
+#include "zlib\zlib.h"
+
 using namespace Gdiplus;
 #pragma comment (lib,"Gdiplus.lib")
+#pragma comment (lib,"Msimg32.lib") 

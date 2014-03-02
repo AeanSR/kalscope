@@ -11,7 +11,10 @@
 #include "stdafx.h"
 #include "KalScope.h"
 
-static const char codename_str[] = "AI Core Module \"Dolanaar\" 2014Feb.";
+static const char codename_str[] = "AI Core Module \"Dolanaar\" 2014Mar.";
+size_t goffset = 0;
+char* init_str = NULL;
+int init_finished = 0;
 
 /* Search Depth. This macro is equal to max depth minus 1.  */
 #define intelligence 6
@@ -102,7 +105,7 @@ int count_processor(){
 	GetSystemInfo(&info);
 	return info.dwNumberOfProcessors;
 }
-static const int ccpu = count_processor();
+static const size_t ccpu = count_processor();
 
 // Determine the size of TT.
 size_t memory_to_use(){
@@ -398,22 +401,35 @@ char eval_win(){
 void init_table(){
 	if (init_flag) return;
 	init_flag++;
+	init_str = (char*)calloc(256,1);
 	int a, b;
 	static std::mt19937_64 rng;
 	
+	strcpy(init_str, "Constructing evaluation table ...");
 	table_f = (int32_t*)malloc(14348907 * sizeof(int32_t));
 	if (table_f == NULL)
 		exit(0);
 
-	FILE* in = fopen("eval.tbl", "rb");
+	strcpy(init_str, "Reading evaluation table ...");
+	gzFile in = gzopen("eval.ks", "rb");
+	//FILE* in = fopen("eval.tbl", "rb");
 	if (in == NULL){
-		MessageBoxA(0, "Evaluation table not found. Will terminate.\n"
-			"(Have you extracted the zip file?)", "Fatal error", 0);
+		MessageBoxA(0, "Evaluation table \"eval.ks\" not found. Will terminate.\n"
+			"(Have you extracted the archive?)", "Fatal error", 0);
 		exit(0);
 	}
-	fread(table_f, sizeof(int32_t), 14348907, in);
-	fclose(in);
 
+	while (!gzeof(in)){
+	//while (!feof(in)){
+		goffset += gzread(in, ((char*)table_f) + goffset, 4096);
+		//goffset += fread(((char*)table_f) + goffset, 1, 4096, in);
+		sprintf(init_str, "Reading evaluation table (%d%%)...", goffset * 100 / (14348907 * sizeof(int32_t)));
+	}
+	
+	gzclose(in);
+	//fclose(in);
+
+	strcpy(init_str, "Constructing transpose table ...");
 	HASH_SIZE = memory_to_use() - 1;
 	hash_table = new hash_t[HASH_SIZE + 1];
 	memset(hash_table, 0, sizeof(hash_t)*(HASH_SIZE + 1)); //Occupy memory. Avoid another kalscope process allocate hash table too large.
@@ -422,6 +438,8 @@ void init_table(){
 			zobrist[0][a][b] = rng();
 			zobrist[1][a][b] = rng();
 		}
+	*init_str = '\0';
+	init_finished++;
 }
 
 // Evaluation function.

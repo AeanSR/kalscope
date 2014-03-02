@@ -7,7 +7,7 @@
 */
 
 /**
-    This subroutine auto generate an proto evaluation lookup table.
+    This subroutine auto generate a proto of evaluation lookup table.
     The proto table only include knowledges about which line is a "win"
     and which line is a "lose". All of the human-given informations in
     KalScope are no more than "just go connect five", the only, very
@@ -49,7 +49,8 @@ char board[16] = {0};
 int32_t eval_w(){
     int i;
     for(i=0;i<11;i++){
-            if (board[i]==board[i+1]&&
+            if (board[i]>0&&
+                board[i]==board[i+1]&&
                 board[i]==board[i+2]&&
                 board[i]==board[i+3]&&
                 board[i]==board[i+4]){
