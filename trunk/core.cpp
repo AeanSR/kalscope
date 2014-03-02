@@ -620,9 +620,11 @@ int32_t __fastcall alpha_beta(int32_t alpha, int32_t beta, int depth, int who2mo
 		if (found && h->depth >= depth){
 			if (eval_stype(h) == TYPE_PV)
 				return h->value;
-			else if (eval_stype(h) == TYPE_B)
+			else if (eval_stype(h) == TYPE_B){
 				alpha = max32(alpha, h->value);
-			else if (eval_stype(h) == TYPE_A && h->value <= alpha)
+				if (alpha >= beta)
+					return beta;
+			}else if (eval_stype(h) == TYPE_A && h->value <= alpha)
 				return alpha;
 		}
 
@@ -795,7 +797,7 @@ void ai_run(){
 
 	// Probe TT.
 	uint64_t k = zobrist_key();
-	hash_t* h = &hash_table[k & (HASH_SIZE-1)];
+	hash_t* h = &hash_table[k & (HASH_SIZE - 1)];
 	if (h->key == key && eval_stype(h)){
 		bx = h->x;
 		by = h->y;
@@ -821,8 +823,8 @@ void ai_run(){
 			bit_unmakemove(x, y, 1);
 			bit_makemove(x, y, 2);
 			if (eval_w()){
-				pushmove(x, y, INT32_MIN);
-				mvcount++;
+				mainboard[x][y] = 1;
+				return;
 			}
 			bit_unmakemove(x, y, 2);
 			mask &= mask - 1;
@@ -830,29 +832,28 @@ void ai_run(){
 	}
 
 	// Generate all moves.
-	if (mvcount == 0)
-		for (x = 0; x < 15; x++){
-			unsigned long mask = bitboard_mc[x];
-			while (mask){
-				_BitScanForward(&c, mask);
-				y = c;
+	for (x = 0; x < 15; x++){
+		unsigned long mask = bitboard_mc[x];
+		while (mask){
+			_BitScanForward(&c, mask);
+			y = c;
 
-				if (x == bx&&y == by) continue;
-				k ^= zobrist[0][x][y];
-				hash_t* p = &hash_table[k & HASH_SIZE];
-				// move_sort do descending, but we need a ascending sort.
-				pushmove(x, y, -(p->key == k ? p->value : 0));
-				k ^= zobrist[0][x][y];
-				mvcount++;
+			if (x == bx&&y == by) continue;
+			k ^= zobrist[0][x][y];
+			hash_t* p = &hash_table[k & HASH_SIZE];
+			// move_sort do descending, but we need a ascending sort.
+			pushmove(x, y, -(p->key == k ? p->value : 0));
+			k ^= zobrist[0][x][y];
+			mvcount++;
 
-				mask &= mask - 1;
-			}
+			mask &= mask - 1;
 		}
+	}
 	if (bx != 0xfe){
 		mvcount++;
 		pushmove(bx, by, INT32_MIN);
 	}
-	
+
 	// Iterative deeping.
 	int maxdepth = 0;
 	while (maxdepth <= intelligence){
