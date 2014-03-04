@@ -406,7 +406,7 @@ void init_table(){
 	static std::mt19937_64 rng;
 	
 	strcpy(init_str, "Constructing evaluation table ...");
-	table_f = (int32_t*)malloc(14348907 * sizeof(int32_t));
+	table_f = (int32_t*)_aligned_malloc(14348907 * sizeof(int32_t),16);
 	if (table_f == NULL)
 		exit(0);
 
@@ -430,8 +430,7 @@ void init_table(){
 	//fclose(in);
 
 	strcpy(init_str, "Constructing transpose table ...");
-	HASH_SIZE = memory_to_use() - 1;
-	hash_table = new hash_t[HASH_SIZE + 1];
+	hash_table = (hash_t*)_aligned_malloc(sizeof(hash_t) * (HASH_SIZE + 1), 16);
 	memset(hash_table, 0, sizeof(hash_t)*(HASH_SIZE + 1)); //Occupy memory. Avoid another kalscope process allocate hash table too large.
 	for (a = 0; a < 15; a++)
 		for (b = 0; b < 15; b++){
@@ -613,17 +612,15 @@ int32_t __fastcall alpha_beta(int32_t alpha, int32_t beta, int depth, int who2mo
 	int hx = 0xfe;
 	char color = (who2move > 0 ? 1 : 2);
 	int alpha_raised = 0;
-	bool found = !(h->key ^ key);
+	bool found = (h->key == key);
 
 	if (depth){
 		// If TT returned a deeper history result, use it.
 		if (found && h->depth >= depth){
 			if (eval_stype(h) == TYPE_PV)
 				return h->value;
-			else if (eval_stype(h) == TYPE_B){
-				alpha = max32(alpha, h->value);
-				if (alpha >= beta)
-					return beta;
+			else if (eval_stype(h) == TYPE_B && h->value >= beta){
+				return beta;
 			}else if (eval_stype(h) == TYPE_A && h->value <= alpha)
 				return alpha;
 		}
