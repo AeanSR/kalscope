@@ -612,7 +612,7 @@ int32_t __fastcall alpha_beta(int32_t alpha, int32_t beta, int depth, int who2mo
 	int hx = 0xfe;
 	char color = (who2move > 0 ? 1 : 2);
 	int alpha_raised = 0;
-	bool found = (h->key == key);
+	bool found = 0;// (h->key == key);
 
 	if (depth){
 		// If TT returned a deeper history result, use it.
@@ -818,6 +818,14 @@ void ai_run(){
 				return;
 			}
 			bit_unmakemove(x, y, 1);
+			mask &= mask - 1;
+		}
+	}
+	for (x = 0; x < 15; x++){
+		unsigned long mask = bitboard_mc[x];
+		while (mask){
+			_BitScanForward(&c, mask);
+			y = c;
 			bit_makemove(x, y, 2);
 			if (eval_w()){
 				mainboard[x][y] = 1;
@@ -827,7 +835,6 @@ void ai_run(){
 			mask &= mask - 1;
 		}
 	}
-
 	// Generate all moves.
 	for (x = 0; x < 15; x++){
 		unsigned long mask = bitboard_mc[x];
