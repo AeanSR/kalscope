@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include "KalScope.h"
 
+#define _CRT_SECURE_NO_WARNINGS
 
 //以下为自订义的读取资源函数
 BOOL ImageFromIDResource(UINT nID, LPCTSTR sTR, Image * &pImg)
@@ -33,7 +34,7 @@ void paint_board(HWND hWnd){
 	::Graphics *myGraphics;
 	Gdiplus::Brush *myPen[3];
 	HDC hdc;
-
+	
 	hdc = GetDC(hWnd);
 	myGraphics = new ::Graphics(hdc);
 	myPen[1] = new Gdiplus::SolidBrush(Color(255, 255, 0, 0));
@@ -49,6 +50,19 @@ void paint_board(HWND hWnd){
 	myPen[1] = new Gdiplus::SolidBrush(Color(255, 255, 255, 255));
 	myGraphics->FillEllipse(myPen[1], Rect(16 + 25 * (mx), 16 + 25 * (my), 8, 8));
 	delete myPen[1];
+
+	char* str = (char*)alloca(256);
+	sprintf(str, "%d knps", node / time_limit);
+	WCHAR* drawString = (WCHAR*)calloc(256, sizeof(WCHAR));
+	MultiByteToWideChar(CP_ACP, 0, str, (int)strlen(str), drawString, 255);
+	// Create font and brush.
+	Font* drawFont = new Font(L"Tahoma", 8);
+	SolidBrush* drawBrush = new SolidBrush(Color::Black);
+	// Create point for upper-left corner of drawing.
+	PointF drawPoint = PointF(0.0F, 0.0F);
+	// Draw string to screen.
+	myGraphics->DrawString(drawString, -1, drawFont, drawPoint, drawBrush);
+
 	delete myGraphics;
 }
 
@@ -110,7 +124,9 @@ void piece(HWND hWnd, unsigned int x, unsigned int y){
 	std::thread* t = new std::thread(thinking, hWnd);
 	t->detach();
 	ai_run();
-	paint_board(hWnd);
+
+	InvalidateRect(hWnd, NULL, TRUE);
+
 	if (eval_win()){
 		MessageBox(hWnd, TEXT("Red win."), TEXT(""), NULL);
 		clear_board(hWnd);
