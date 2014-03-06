@@ -15,9 +15,6 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <Text Include="ReadMe.txt" />
-  </ItemGroup>
-  <ItemGroup>
     <ClInclude Include="stdafx.h">
       <Filter>头文件</Filter>
     </ClInclude>
@@ -57,9 +54,6 @@
     </ResourceCompile>
   </ItemGroup>
   <ItemGroup>
-    <Image Include="ashentech.bmp">
-      <Filter>资源文件</Filter>
-    </Image>
     <Image Include="minstamp32.ico">
       <Filter>资源文件</Filter>
     </Image>
@@ -69,10 +63,5 @@
     <Image Include="testsplash.png">
       <Filter>资源文件</Filter>
     </Image>
-  </ItemGroup>
-  <ItemGroup>
-    <None Include="..\..\aeanswiftriver%40gmail.com\KalScope\eval_gen\eval.inc">
-      <Filter>源文件</Filter>
-    </None>
   </ItemGroup>
 </Project>

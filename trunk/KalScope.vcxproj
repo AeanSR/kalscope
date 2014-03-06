@@ -162,9 +162,6 @@
     </CustomBuildStep>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <Text Include="ReadMe.txt" />
-  </ItemGroup>
-  <ItemGroup>
     <ClInclude Include="..\..\aeanswiftriver%40gmail.com\KalScope\zlib\zconf.h" />
     <ClInclude Include="..\..\aeanswiftriver%40gmail.com\KalScope\zlib\zlib.h" />
     <ClInclude Include="KalScope.h" />
@@ -199,12 +196,8 @@
   </ItemGroup>
   <ItemGroup>
     <Image Include="testsplash.png" />
-    <Image Include="ashentech.bmp" />
     <Image Include="minstamp32.ico" />
     <Image Include="minstamp64.ico" />
-  </ItemGroup>
-  <ItemGroup>
-    <None Include="..\..\aeanswiftriver%40gmail.com\KalScope\eval_gen\eval.inc" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

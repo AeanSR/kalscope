@@ -176,7 +176,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			return DefWindowProc(hWnd, message, wParam, lParam);
 		}
 		break;
-	case WM_PAINT:
+	case WM_PAINT:{
 		Graphics *myGraphics;
 		Pen *myPen;
 		hdc = BeginPaint(hWnd, &ps);
@@ -184,14 +184,15 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		myGraphics = new Graphics(hdc);
 		myPen = new Pen(Color(255, 0, 0, 0), 1);
 		myGraphics->DrawRectangle(myPen, Rect(400, 20, 20, 20));
-		for (int i = 0; i < 375; i+= 25)
+		for (int i = 0; i < 375; i += 25)
 			myGraphics->DrawLine(myPen, 20, 20 + i, 370, 20 + i);
 		for (int i = 0; i < 375; i += 25)
 			myGraphics->DrawLine(myPen, 20 + i, 20, 20 + i, 370);
 		delete myGraphics;
 		delete myPen;
-		EndPaint(hWnd, &ps); 
+		EndPaint(hWnd, &ps);
 		paint_board(hWnd);
+	}
 		break;
 	case WM_DESTROY:
 		GdiplusShutdown(gdiplusToken);
