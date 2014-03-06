@@ -523,6 +523,7 @@ int move_gen(move_t* movelist, hash_t* h, int color, int depth){
 	uint64_t k;
 	hash_t* p;
 	int32_t score = incremental_eval;
+	int32_t val = 0;
 
 	// Probe TT to see if a best move was recorded.
 	if (h->key == key && eval_stype(h) && h->x != 0xfe){
@@ -547,7 +548,7 @@ int move_gen(move_t* movelist, hash_t* h, int color, int depth){
 				y = c;
 				if (lookfor_threat){
 					bit_makemove(x, y, color);
-					int32_t val = incremental_eval;
+					val = incremental_eval;
 					bit_unmakemove(x, y, color);
 					// If this move do not make a difference, ignore it.
 					// 0x04000000 is the score of a living-three / jump-three.
@@ -556,19 +557,26 @@ int move_gen(move_t* movelist, hash_t* h, int color, int depth){
 						continue;
 					}
 				}
-				if (depth >= 3 && (x ^ hx) | (y ^ hy)) {
-					// Try probe a history evaluation for move sorting.
-					k = key ^ zobrist[color - 1][x][y];
-					p = &hash_table[k & HASH_SIZE];
-					int64_t mkey = p->key;
-					movelist[count].x = x;
-					movelist[count].y = y;
-					count++;
-					mkey ^= k;
-					mkey |= (-mkey);
-					mkey = (uint64_t)mkey >> 63;
-					mkey = -mkey;
-					movelist[count].score = mkey & p->value;
+				if ((x ^ hx) | (y ^ hy)) {
+					if (depth < 3){
+						movelist[count].x = x;
+						movelist[count].y = y;
+						movelist[count].score = val;
+						count++;
+					}else{
+						// Try probe a history evaluation for move sorting.
+						k = key ^ zobrist[color - 1][x][y];
+						p = &hash_table[k & HASH_SIZE];
+						int64_t mkey = p->key;
+						movelist[count].x = x;
+						movelist[count].y = y;
+						count++;
+						mkey ^= k;
+						mkey |= (-mkey);
+						mkey = (uint64_t)mkey >> 63;
+						mkey = -mkey;
+						movelist[count].score = mkey & p->value;
+					}
 				}
 				else{
 					// TT gives a best move, it should be first searched.
@@ -785,7 +793,6 @@ int32_t __fastcall alpha_beta(int32_t alpha, int32_t beta, int depth, int who2mo
 		node++;
 		/* Depth == 0: call evaluation function. */
 		reg = who2move * incremental_eval;
-		record_hash(reg);
 		return reg;
 	}
 }
