@@ -16,8 +16,9 @@ size_t goffset = 0;
 char* init_str = NULL;
 int init_finished = 0;
 
-/* Search Depth. This macro is equal to max depth minus 1.  */
-#define intelligence 6
+// Time limit, in millisecond.
+static const int time_limit = 5000;
+volatile bool time_out = 0;
 
 //Some branch-less macros.
 #define sshr32(v,d) (-(int32_t)((uint32_t)(v) >> d))
@@ -134,10 +135,10 @@ void __forceinline bit_makemove(int x, int y, char color){
 	subscript[x] += poweru3[y] << (color - 1);
 	bitboard_h[color - 1][y] |= 1 << x;
 	subscript_h[y] += poweru3[x] << (color - 1);
-	bitboard_d[color - 1][14 - x + y] |= 1 << (x);
+	bitboard_d[color - 1][14 - x + y] |= 1 << x;
 	subscript_d[14 - x + y] += poweru3[x] << (color - 1);
-	bitboard_ad[color - 1][x + y] |= 1 << (14 - x);	
-	subscript_ad[x + y] += poweru3[14 - x] << (color - 1);
+	bitboard_ad[color - 1][x + y] |= 1 << x;	
+	subscript_ad[x + y] += poweru3[x] << (color - 1);
 
 }
 void __forceinline bit_makemove(move_t& move, char color){
@@ -148,10 +149,10 @@ void __forceinline bit_unmakemove(int x, int y, char color){
 	subscript[x] -= poweru3[y] << (color - 1);
 	bitboard_h[color - 1][y] &= ~(1 << x);
 	subscript_h[y] -= poweru3[x] << (color - 1);
-	bitboard_d[color - 1][14 - x + y] &= ~(1 << (x));
+	bitboard_d[color - 1][14 - x + y] &= ~(1 << x);
 	subscript_d[14 - x + y] -= poweru3[x] << (color - 1);
-	bitboard_ad[color - 1][x + y] &= ~(1 << (14 - x));
-	subscript_ad[x + y] -= poweru3[14 - x] << (color - 1);
+	bitboard_ad[color - 1][x + y] &= ~(1 << x);
+	subscript_ad[x + y] -= poweru3[x] << (color - 1);
 }
 void __forceinline bit_unmakemove(move_t& move, char color){
 	bit_unmakemove(move.x, move.y, color);
@@ -430,6 +431,7 @@ void init_table(){
 	//fclose(in);
 
 	strcpy(init_str, "Constructing transpose table ...");
+	HASH_SIZE = memory_to_use() - 1;
 	hash_table = (hash_t*)_aligned_malloc(sizeof(hash_t) * (HASH_SIZE + 1), 16);
 	memset(hash_table, 0, sizeof(hash_t)*(HASH_SIZE + 1)); //Occupy memory. Avoid another kalscope process allocate hash table too large.
 	for (a = 0; a < 15; a++)
@@ -496,20 +498,36 @@ int move_gen(move_t* movelist, hash_t* h, int color, int depth){
 	int hx = 0xfe;
 	int hy = 0xfe;
 	int x, y;
+	int32_t score = eval_s();
 	unsigned long c, mask;
 	uint64_t k;
 	hash_t* p;
 	if (h->key == key && eval_stype(h) && h->x != 0xfe){
 		hx = h->x;
 		hy = h->y;
+		if ((bitboard[0][hx] | bitboard[1][hx]) & (1 << hy)){
+			hx = 0xfe;
+			hy = 0xfe;
+		}
 	}
 	bit_cutidle();
 	if(depth >= 2){
+		bool lookfor_threat = 1;
+		look_again:
 		for (x = 0; x < 15; x++){
 			mask = bitboard_mc[x];
 			while (mask){
 				_BitScanForward(&c, mask);
 				y = c;
+				if (lookfor_threat){
+					bit_makemove(x, y, color);
+					int32_t val = eval_s();
+					bit_unmakemove(x, y, color);
+					if (abs32(val - score) < 0x04000000){
+						mask &= mask - 1;
+						continue;
+					}
+				}
 				if ((x ^ hx) | (y ^ hy)) {
 					k = key ^ zobrist[color - 1][x][y];
 					p = &hash_table[k & HASH_SIZE];
@@ -531,6 +549,10 @@ int move_gen(move_t* movelist, hash_t* h, int color, int depth){
 				}
 				mask &= mask - 1;
 			}
+		}
+		if (lookfor_threat && count == 0){
+			lookfor_threat = 0;
+			goto look_again;
 		}
 		move_sort(movelist, 0, count - 1);
 	}
@@ -605,14 +627,18 @@ int32_t fork_subthread(bool* ready, move_t move,
 // Alpha-beta search frame.
 int32_t __fastcall alpha_beta(int32_t alpha, int32_t beta, int depth, int who2move, int is_pv){
 	hash_t* h = &hash_table[key & HASH_SIZE];
+	hash_t __declspec(align(16)) tt;
+	register __m128i xmm = _mm_load_si128((__m128i*)h);
+	h = &tt;
+	_mm_store_si128((__m128i*)h, xmm);
+	
 	int32_t reg;
 	int x, y;
 	int by, bx = 0xfe;
-	int hy = 0xfe;
-	int hx = 0xfe;
 	char color = (who2move > 0 ? 1 : 2);
 	int alpha_raised = 0;
-	bool found = 0;// (h->key == key);
+	bool ready = 0;
+	bool found = (h->key == key);
 
 	if (depth){
 		// If TT returned a deeper history result, use it.
@@ -645,12 +671,12 @@ int32_t __fastcall alpha_beta(int32_t alpha, int32_t beta, int depth, int who2mo
 
 			// If there's an idle CPU, try fork a sub thread.
 			// Only fork PV node.
-			if (is_pv && ltc < ccpu && depth > 3 && forked_move < 16){
+			if (is_pv && i >= 1 && ltc < ccpu && depth > 4 && forked_move < 16){
 				ltclock.lock();
 				if (ltc < ccpu){
 					ltc++;
 					ltclock.unlock();
-					bool ready = 0;
+					ready = 0;
 					forked_return[forked_move] = std::async(
 						fork_subthread, &ready, mlist[i], bitboard, bitboard_h, bitboard_d, bitboard_ad,
 						subscript, subscript_h, subscript_d, subscript_ad,
@@ -775,8 +801,18 @@ void thread_body(int maxdepth){
 		}
 		tlock.unlock();
 		bit_unmakemove(x, y, 1);
+
+		if (time_out)
+			return;
 	}
 
+}
+
+// A stopwatch controls max search time.
+void thread_timer(void){
+	std::chrono::milliseconds dur(time_limit);
+	std::this_thread::sleep_for(dur);
+	time_out = 1;
 }
 
 // AI Entry, call this function when you want computer make a move.
@@ -785,7 +821,9 @@ void ai_run(){
 
 	// Initialize.
 	tid = 0;
+	time_out = 0;
 	mx = 0xfe;
+	msp = 0;
 	init_table();
 	int mvcount = 0;
 	int bx = 0xfe;
@@ -798,7 +836,7 @@ void ai_run(){
 	if (h->key == key && eval_stype(h)){
 		bx = h->x;
 		by = h->y;
-		if (bx >= 15 || bx < 0 || by >= 15 || by < 0){
+		if (bx >= 15 || bx < 0 || by >= 15 || by < 0 || mainboard[bx][by] != 0){
 			bx = 0xfe;
 			by = 0xfe;
 		}
@@ -841,7 +879,6 @@ void ai_run(){
 		while (mask){
 			_BitScanForward(&c, mask);
 			y = c;
-
 			if (x == bx&&y == by) continue;
 			k ^= zobrist[0][x][y];
 			hash_t* p = &hash_table[k & HASH_SIZE];
@@ -858,9 +895,13 @@ void ai_run(){
 		pushmove(bx, by, INT32_MIN);
 	}
 
+	// Set up a timer.
+	std::thread* timer = new std::thread(thread_timer);
+	timer->detach();
+
 	// Iterative deeping.
 	int maxdepth = 0;
-	while (maxdepth <= intelligence){
+	while (!time_out){
 		msp = mvcount;
 		move_sort(msa, 0, mvcount - 1);
 
@@ -900,6 +941,8 @@ void ai_run(){
 			break;
 		maxdepth += 1;
 	}
+
+	delete timer;
 
 	// Make the actual move.
 	mainboard[mx][my] = 1;
