@@ -138,7 +138,7 @@
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <PreprocessorDefinitions>WIN32;NDEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <Parallelization>true</Parallelization>
-      <OpenMPSupport>false</OpenMPSupport>
+      <OpenMPSupport>true</OpenMPSupport>
       <UseMSVC>true</UseMSVC>
       <AdditionalIncludeDirectories>
       </AdditionalIncludeDirectories>
@@ -146,6 +146,8 @@
       <AdditionalOptions />
       <FavorSizeOrSpeed>
       </FavorSizeOrSpeed>
+      <EnableFiberSafeOptimizations>
+      </EnableFiberSafeOptimizations>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>

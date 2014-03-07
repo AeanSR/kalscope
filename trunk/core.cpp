@@ -17,9 +17,10 @@ static const char codename_str[] = "AI Kernel \"Dolanaar\" 2014Mar.";
 size_t goffset = 0;
 char* init_str = NULL;
 int init_finished = 0;
+char* debug_str;
 
 // Time limit, in millisecond.
-static const int time_limit = 5000;
+static const int time_limit = 10000;
 volatile bool time_out = 0;
 uint64_t node = 0;
 
@@ -35,6 +36,7 @@ uint64_t node = 0;
 #define SCORE_MMASK ((int32_t)( 1UL << 10 ) - 1)
 #define SCORE_BASE (0UL)
 
+#if defined(USE_TT)
 // Structure for TT.
 enum{
 	TYPE_NON = 0, TYPE_PV = 1, TYPE_A = 2, TYPE_B = 3,
@@ -53,9 +55,9 @@ typedef struct{
 #define HASH_SIZE_DEFAULT (0x1000000)
 size_t HASH_SIZE = HASH_SIZE_DEFAULT - 1;
 static uint64_t zobrist[2][16][16] = { 0 };
-uint64_t __declspec(thread) key = 0;
+__declspec(thread) uint64_t key = 0;
 hash_t* hash_table;
-
+#endif
 
 // Structure for movegen / movesort / movestack.
 struct move_t{
@@ -75,21 +77,21 @@ std::mutex msl;
 
 // Structure for board representation.
 char mainboard[16][16] = { 0 };
-uint16_t __declspec(thread, align(16)) bitboard[2][16] = { 0 };
-uint16_t __declspec(thread, align(16)) bitboard_mc[16] = { 0 };
-uint16_t __declspec(thread, align(16)) bitboard_h[2][16] = { 0 };
-uint16_t __declspec(thread, align(16)) bitboard_d[2][32] = { 0 };
-uint16_t __declspec(thread, align(16)) bitboard_ad[2][32] = { 0 };
+__declspec(thread, align(16)) uint16_t bitboard[2][16] = { 0 };
+__declspec(thread, align(16)) uint16_t bitboard_mc[16] = { 0 };
+__declspec(thread, align(16)) uint16_t bitboard_h[2][16] = { 0 };
+__declspec(thread, align(16)) uint16_t bitboard_d[2][32] = { 0 };
+__declspec(thread, align(16)) uint16_t bitboard_ad[2][32] = { 0 };
 
 // Structure for evaluate lookup table.
 static int32_t* table_f = NULL;
 static int init_flag = 0;
-int __declspec(thread, align(16)) subscript[16] = { 0 };
-int __declspec(thread, align(16)) subscript_h[16] = { 0 };
-int __declspec(thread, align(16)) subscript_d[32] = { 0 };
-int __declspec(thread, align(16)) subscript_ad[32] = { 0 };
-int32_t __declspec(thread, align(16)) incremental_eval = SCORE_BASE;
-int __declspec(thread, align(16)) poweru3[16] = {
+__declspec(thread) int32_t incremental_eval = SCORE_BASE;
+__declspec(thread, align(16)) int subscript[16] = { 0 };
+__declspec(thread, align(16)) int subscript_h[16] = { 0 };
+__declspec(thread, align(16)) int subscript_d[32] = { 0 };
+__declspec(thread, align(16)) int subscript_ad[32] = { 0 };
+static int poweru3[16] = {
 	1, 3, 9, 27, 81, 243, 729, 2187, 6561, 19683, 59049, 177147, 531441, 1594323, 4782969, 14348907
 };
 
@@ -111,9 +113,10 @@ int count_processor(){
 	GetSystemInfo(&info);
 	return info.dwNumberOfProcessors;
 }
-static const size_t ccpu = count_processor();
+static const size_t ccpu = 1;// count_processor();
 
 // Determine the size of TT.
+#if defined(USE_TT)
 size_t memory_to_use(){
 	MEMORYSTATUSEX mem;
 	mem.dwLength = sizeof(MEMORYSTATUSEX);
@@ -133,6 +136,7 @@ size_t memory_to_use(){
 	a /= sizeof(hash_t);
 	return a > 0 ? a : HASH_SIZE_DEFAULT;
 }
+#endif
 
 // Make / Unmake a move on bit board.
 void __forceinline bit_makemove(int x, int y, char color){
@@ -142,9 +146,9 @@ void __forceinline bit_makemove(int x, int y, char color){
 	incremental_eval += table_f[subscript[x]];
 
 	bitboard_h[color - 1][y] |= 1 << x;
-	incremental_eval -= table_f[subscript_h[x]];
+	incremental_eval -= table_f[subscript_h[y]];
 	subscript_h[y] += poweru3[x] << (color - 1);
-	incremental_eval += table_f[subscript_h[x]];
+	incremental_eval += table_f[subscript_h[y]];
 
 	bitboard_d[color - 1][14 - x + y] |= 1 << x;
 	incremental_eval -= table_f[subscript_d[14 - x + y]];
@@ -166,9 +170,9 @@ void __forceinline bit_unmakemove(int x, int y, char color){
 	incremental_eval += table_f[subscript[x]];
 
 	bitboard_h[color - 1][y] &= ~(1 << x);
-	incremental_eval -= table_f[subscript_h[x]];
+	incremental_eval -= table_f[subscript_h[y]];
 	subscript_h[y] -= poweru3[x] << (color - 1);
-	incremental_eval += table_f[subscript_h[x]];
+	incremental_eval += table_f[subscript_h[y]];
 	
 	bitboard_d[color - 1][14 - x + y] &= ~(1 << x);
 	incremental_eval -= table_f[subscript_d[14 - x + y]];
@@ -232,6 +236,7 @@ void bit_cutidle(){
 }
 
 // Generate hash key.
+#if defined(USE_TT)
 uint64_t zobrist_key(){
 	int x, y;
 	unsigned long c;
@@ -254,8 +259,10 @@ uint64_t zobrist_key(){
 	}
 	return z;
 }
+#endif
 
 // Record a transpose item.
+#if defined(USE_TT)
 void __fastcall record_hash(int32_t score, int x = 0xfe, int y = 0xfe, int type = TYPE_NON, int depth = 0){
 	hash_t* p = &hash_table[key & HASH_SIZE];
 	hlock[key % 1024].lock();
@@ -271,8 +278,10 @@ void __fastcall record_hash(int32_t score, int x = 0xfe, int y = 0xfe, int type 
 	p->depth = depth;
 	hlock[key % 1024].unlock();
 }
+#endif
 
 // Judge if win /lose by SSE2 instructions.
+#if defined(USE_TT)
 char eval_w(hash_t* h = NULL){
 	if (h){
 		char type = eval_wtype(h) & 3;
@@ -281,6 +290,9 @@ char eval_w(hash_t* h = NULL){
 		default: return type - 1;
 		}
 	}
+#else
+char eval_w(){
+#endif
 	char result = 0;
 	int c;
 	__m128i xmm1, xmm2, xmm3, xmm4;
@@ -349,7 +361,9 @@ char eval_w(hash_t* h = NULL){
 		}
 	}
 evalw_return:
+#if defined(USE_TT)
 	if (h) h->type |= result + 1;
+#endif
 	return result;
 }
 
@@ -430,7 +444,6 @@ void init_table(){
 	if (init_flag) return;
 	init_flag++;
 	init_str = (char*)calloc(256,1);
-	int a, b;
 	static std::mt19937_64 rng;
 	
 	strcpy(init_str, "Constructing evaluation table ...");
@@ -450,7 +463,8 @@ void init_table(){
 		sprintf(init_str, "Reading evaluation table (%d%%)...", goffset * 100 / (14348907 * sizeof(int32_t)));
 	}
 	gzclose(in);
-
+#if defined(USE_TT)
+	int a, b;
 	strcpy(init_str, "Constructing transpose table ...");
 	HASH_SIZE = memory_to_use() - 1;
 	hash_table = (hash_t*)_aligned_malloc(sizeof(hash_t) * (HASH_SIZE + 1), 16);
@@ -460,6 +474,7 @@ void init_table(){
 			zobrist[0][a][b] = rng();
 			zobrist[1][a][b] = rng();
 		}
+#endif
 	*init_str = '\0';
 	init_finished++;
 }
@@ -514,16 +529,12 @@ void __fastcall move_sort(move_t* movelist, int first, int last){
 int32_t __fastcall alpha_beta(int32_t alpha, int32_t beta, int depth, int who2move, int is_pv);
 
 // Move generator.
+#if defined(USE_TT)
 int move_gen(move_t* movelist, hash_t* h, int color, int depth){
-	int count = 0;
+	hash_t* p;
 	int hx = 0xfe;
 	int hy = 0xfe;
-	int x, y;
-	unsigned long c, mask;
 	uint64_t k;
-	hash_t* p;
-	int32_t score = incremental_eval;
-	int32_t val = 0;
 
 	// Probe TT to see if a best move was recorded.
 	if (h->key == key && eval_stype(h) && h->x != 0xfe){
@@ -535,6 +546,15 @@ int move_gen(move_t* movelist, hash_t* h, int color, int depth){
 			hy = 0xfe;
 		}
 	}
+#else
+int move_gen(move_t* movelist, int color, int depth){
+#endif
+	int count = 0;
+	int x, y;
+	unsigned long c, mask;
+	int32_t score = incremental_eval;
+	int32_t val = 0;
+
 	bit_cutidle();
 
 	// Do threat prune and move sort if depth >= 2.
@@ -551,18 +571,20 @@ int move_gen(move_t* movelist, hash_t* h, int color, int depth){
 					val = incremental_eval;
 					bit_unmakemove(x, y, color);
 					// If this move do not make a difference, ignore it.
-					// 0x04000000 is the score of a living-three / jump-three.
-					if (abs32(val - score) < 0x04000000){
+					if (abs32(val - score) == 0){
 						mask &= mask - 1;
 						continue;
 					}
 				}
+#if defined(USE_TT)
 				if ((x ^ hx) | (y ^ hy)) {
 					if (depth < 3){
+#endif
 						movelist[count].x = x;
 						movelist[count].y = y;
 						movelist[count].score = val;
 						count++;
+#if defined(USE_TT)
 					}else{
 						// Try probe a history evaluation for move sorting.
 						k = key ^ zobrist[color - 1][x][y];
@@ -585,6 +607,7 @@ int move_gen(move_t* movelist, hash_t* h, int color, int depth){
 					movelist[count].y = y;
 					count++;
 				}
+#endif
 				mask &= mask - 1;
 			}
 		}
@@ -605,12 +628,16 @@ int move_gen(move_t* movelist, hash_t* h, int color, int depth){
 				y = c;
 				movelist[count].x = x;
 				movelist[count].y = y;
+#if defined(USE_TT)
 				if ((x ^ hx) | (y ^ hy))
+#endif
 					movelist[count].score = 0;
+#if defined(USE_TT)
 				else{
 					movelist[count].score = INT32_MAX;
 					movelist[0].swap(movelist[count]);
 				}
+#endif
 				count++;
 				mask &= mask - 1;
 			}
@@ -643,7 +670,9 @@ int32_t fork_subthread(bool* ready, move_t move,
 	*ready = 1;
 
 	// Set up.
-	key = k;
+#if defined(USE_TT)
+	key = k ^ zobrist[color - 1][x][y];
+#endif
 	int32_t reg;
 	char color = (who2move > 0 ? 1 : 2);
 	int x = move.x;
@@ -651,7 +680,6 @@ int32_t fork_subthread(bool* ready, move_t move,
 
 	// Make move.
 	bit_makemove(x, y, color);
-	key ^= zobrist[color - 1][x][y];
 
 	// Search.
 	reg = -alpha_beta(-alpha - 1, -alpha, depth - 1, -who2move, 0);
@@ -681,6 +709,7 @@ int32_t __fastcall alpha_beta(int32_t alpha, int32_t beta, int depth, int who2mo
 	bool ready = 0;
 
 	if (depth){
+#if defined(USE_TT)
 		// Probe TT. We don't use stream load since the recently probed TT may hit again soon.
 		hash_t* h = &hash_table[key & HASH_SIZE];
 		hash_t __declspec(align(16)) tt;
@@ -701,12 +730,18 @@ int32_t __fastcall alpha_beta(int32_t alpha, int32_t beta, int depth, int who2mo
 
 		// Call eval_w().
 		if (eval_w(found ? h : NULL))
+#else
+		if (eval_w())
+#endif
 			return alpha;
 
 		// Generate all moves and sort.
 		move_t mlist[225];
+#if defined(USE_TT)
 		int count = move_gen(mlist, h, color, depth);
-
+#else
+		int count = move_gen(mlist, color, depth);
+#endif
 		// Fork sub threads when appropriate.
 		int forked_move = 0;
 		std::future<int32_t> forked_return[16];
@@ -719,7 +754,7 @@ int32_t __fastcall alpha_beta(int32_t alpha, int32_t beta, int depth, int who2mo
 
 			// If there's an idle CPU, try fork a sub thread.
 			// Only fork PV node.
-			if (is_pv && i >= 1 && ltc < ccpu && depth > 4 && forked_move < 16){
+			if (0 && is_pv && i >= 1 && ltc < ccpu && depth > 4 && forked_move < 16){
 				ltclock.lock();
 				if (ltc < ccpu){
 					ltc++;
@@ -728,7 +763,11 @@ int32_t __fastcall alpha_beta(int32_t alpha, int32_t beta, int depth, int who2mo
 					forked_return[forked_move] = std::async(
 						fork_subthread, &ready, mlist[i], bitboard, bitboard_h, bitboard_d, bitboard_ad,
 						subscript, subscript_h, subscript_d, subscript_ad,
+#if defined(USE_TT)
 						key, alpha, beta, depth, who2move);
+#else
+						0, alpha, beta, depth, who2move);
+#endif
 					forked_move++;
 
 					// Wait for sub thread to make a board copy.
@@ -741,8 +780,9 @@ int32_t __fastcall alpha_beta(int32_t alpha, int32_t beta, int depth, int who2mo
 
 			// Make move.
 			bit_makemove(x, y, color);
+#if defined(USE_TT)
 			key ^= zobrist[color - 1][x][y];
-
+#endif
 			// Do principle variation search.
 			if (!is_pv || depth < 3)
 				reg = -alpha_beta(-beta, -alpha, depth - 1, -who2move, 0);
@@ -756,9 +796,13 @@ int32_t __fastcall alpha_beta(int32_t alpha, int32_t beta, int depth, int who2mo
 
 			// Unmake Move.
 			bit_unmakemove(x, y, color);
+#if defined(USE_TT)
 			key ^= zobrist[color - 1][x][y];
+#endif
 			if (reg >= beta){
+#if defined(USE_TT)
 				record_hash(beta, x, y, TYPE_B, depth);
+#endif
 				return beta;
 			}
 			if (reg > alpha){
@@ -773,7 +817,9 @@ int32_t __fastcall alpha_beta(int32_t alpha, int32_t beta, int depth, int who2mo
 		while (forked_move--){
 			reg = forked_return[forked_move].get();
 			if (reg >= beta){
+#if defined(USE_TT)
 				record_hash(beta, x, y, TYPE_B, depth);
+#endif
 				return beta;
 			}
 			if (reg > alpha){
@@ -785,8 +831,10 @@ int32_t __fastcall alpha_beta(int32_t alpha, int32_t beta, int depth, int who2mo
 		}
 
 		// Fail low.
+#if defined(USE_TT)
 		if (bx != 0xfe) record_hash(alpha, bx, by, TYPE_PV, depth);
 		else record_hash(alpha, 0xfe, 0xfe, TYPE_A, depth);
+#endif
 		return alpha;
 	}
 	else{
@@ -827,18 +875,24 @@ void thread_body(int maxdepth){
 	move_t* mp;
 	while (getmove(x, y, &mp)){
 		bit_makemove(x, y, 1);
+#if defined(USE_TT)
 		key = zobrist_key();
+#endif
 		tlock.lock();
 		localm = m;
 		tlock.unlock();
 
 		if (localm <= SCORE_LOSE)
-			reg = -alpha_beta(-SCORE_WIN, -localm, maxdepth, -1, 1);
+			reg = -alpha_beta(-SCORE_WIN, -localm + 1, maxdepth, -1, 1);
 		else{
-			reg = -alpha_beta(-localm - 1, -localm, maxdepth, -1, 0);
+			reg = -alpha_beta(-localm - 1, -localm + 1, maxdepth, -1, 0);
 			if (reg > localm && reg < SCORE_WIN)
-				reg = -alpha_beta(-SCORE_WIN, -localm, maxdepth, -1, 1);
+				reg = -alpha_beta(-SCORE_WIN, -localm - 1, maxdepth, -1, 1);
 		}
+		
+		char* app = (char*)alloca(256);
+		sprintf(app, "move(%d,%d), maxd %d, score %08X\n", x, y, maxdepth, reg);
+		strcat(debug_str, app);
 
 		tlock.lock();
 		if (reg > m || mx == 0xfe){
@@ -878,7 +932,9 @@ void ai_run(){
 	int bx = 0xfe;
 	int by = 0xfe;
 	bit_copyboard();
+	debug_str = (char*)malloc(534288);
 
+#if defined(USE_TT)
 	// Probe TT.
 	uint64_t k = zobrist_key();
 	hash_t* h = &hash_table[k & (HASH_SIZE - 1)];
@@ -890,7 +946,7 @@ void ai_run(){
 			by = 0xfe;
 		}
 	}
-
+#endif
 	// See if we are in check.
 	bit_cutidle();
 	unsigned long c;
@@ -928,12 +984,16 @@ void ai_run(){
 		while (mask){
 			_BitScanForward(&c, mask);
 			y = c;
+#if defined(USE_TT)
 			if (x == bx&&y == by) continue;
 			k ^= zobrist[0][x][y];
 			hash_t* p = &hash_table[k & HASH_SIZE];
 			// move_sort do descending, but we need a ascending sort.
 			pushmove(x, y, -(p->key == k ? p->value : 0));
 			k ^= zobrist[0][x][y];
+#else
+			pushmove(x, y, 0);
+#endif
 			mvcount++;
 
 			mask &= mask - 1;
@@ -964,13 +1024,21 @@ void ai_run(){
 		mx = x;
 		my = y;
 		bit_makemove(x, y, 1);
+#if defined(USE_TT)
 		key ^= zobrist[0][x][y];
+#endif
 		ltc++;
 		m = -alpha_beta(-SCORE_WIN, -SCORE_LOSE, maxdepth, -1, 1);
+		
+		char* app = (char*)alloca(256);
+		sprintf(app, "OLDBRO move(%d,%d), maxd %d, score %08X\n", x, y, maxdepth, m);
+		strcat(debug_str, app);
+
 		mp->score = -m;
 		bit_unmakemove(x, y, 1);
+#if defined(USE_TT)
 		key ^= zobrist[0][x][y];
-
+#endif
 		// Young brother start.
 		ltc = 0;
 		for (x = 0; x < ccpu; x++)
@@ -998,6 +1066,15 @@ void ai_run(){
 
 	TerminateThread(timer->native_handle(), 0);
 	delete timer;
+
+	char* app = (char*)alloca(256);
+	sprintf(app, "choose move(%d,%d).\n", cx, cy);
+	strcat(debug_str, app);
+
+	FILE* f = fopen("debuglog.txt", "w");
+	fprintf(f, debug_str);
+	delete debug_str;
+	fclose(f);
 
 	// Make the actual move.
 	mainboard[cx][cy] = 1;
