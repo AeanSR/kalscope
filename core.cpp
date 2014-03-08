@@ -893,10 +893,10 @@ void thread_body(int maxdepth){
 		char* app = (char*)alloca(256);
 		sprintf(app, "move(%d,%d), maxd %d, score %08X\n", x, y, maxdepth, reg);
 		strcat(debug_str, app);
+		mp->score = -reg; // move_sort do descending, but we need a ascending sort.
 
 		tlock.lock();
 		if (reg > m || mx == 0xfe){
-			mp->score = -reg; // move_sort do descending, but we need a ascending sort.
 			m = reg;
 			mx = x;
 			my = y;
@@ -1031,6 +1031,10 @@ void ai_run(){
 		m = -alpha_beta(-SCORE_WIN, -SCORE_LOSE, maxdepth, -1, 1);
 		
 		char* app = (char*)alloca(256);
+		for (int dei = 0; dei < mvcount; dei++){
+			sprintf(app, "SORT (%d,%d) - %08X\n", msa[dei].x, msa[dei].y, msa[dei].score);
+			strcat(debug_str, app);
+		}
 		sprintf(app, "OLDBRO move(%d,%d), maxd %d, score %08X\n", x, y, maxdepth, m);
 		strcat(debug_str, app);
 
