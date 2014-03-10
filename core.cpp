@@ -3,7 +3,8 @@
 	AI Kernel
 	Copyright (C) 2014 AeanSR <http://aean.net/>
 
-	Free to use, copy, modify or distribute. No warranty is given.
+	KalScope is released under the terms of the MIT License. Free to use
+	for any purpose, as long as this copyright notice is preserved.
 */
 
 // Disable MSVC's annoying secure warnings.
@@ -11,6 +12,10 @@
 
 #include "stdafx.h"
 #include "KalScope.h"
+
+// Preprocessed macros to control KS ability.
+#define USE_TT	// Use transpose table or not
+#undef  USE_LOG	// Use debug log file or not
 
 // State globals shared to interface.
 static const char codename_str[] = "AI Kernel \"Dolanaar\" 2014Mar.";
@@ -113,7 +118,7 @@ int count_processor(){
 	GetSystemInfo(&info);
 	return info.dwNumberOfProcessors;
 }
-static const size_t ccpu = 1;// count_processor();
+static const size_t ccpu = count_processor();
 
 // Determine the size of TT.
 #if defined(USE_TT)
@@ -138,50 +143,44 @@ size_t memory_to_use(){
 }
 #endif
 
-// Make / Unmake a move on bit board.
+// Make / Unmake a move on bit board, and host the incremental evalutation.
 void __forceinline bit_makemove(int x, int y, char color){
-	bitboard[color - 1][x] |= 1 << y;
 	incremental_eval -= table_f[subscript[x]];
 	subscript[x] += poweru3[y] << (color - 1);
-	incremental_eval += table_f[subscript[x]];
-
-	bitboard_h[color - 1][y] |= 1 << x;
 	incremental_eval -= table_f[subscript_h[y]];
 	subscript_h[y] += poweru3[x] << (color - 1);
-	incremental_eval += table_f[subscript_h[y]];
-
-	bitboard_d[color - 1][14 - x + y] |= 1 << x;
 	incremental_eval -= table_f[subscript_d[14 - x + y]];
 	subscript_d[14 - x + y] += poweru3[x] << (color - 1);
-	incremental_eval += table_f[subscript_d[14 - x + y]];
-
-	bitboard_ad[color - 1][x + y] |= 1 << x;	
 	incremental_eval -= table_f[subscript_ad[x + y]];
 	subscript_ad[x + y] += poweru3[x] << (color - 1);
+	bitboard[color - 1][x] |= 1 << y;
+	incremental_eval += table_f[subscript[x]];
+	bitboard_h[color - 1][y] |= 1 << x;
+	incremental_eval += table_f[subscript_h[y]];
+	bitboard_d[color - 1][14 - x + y] |= 1 << x;
+	incremental_eval += table_f[subscript_d[14 - x + y]];
+	bitboard_ad[color - 1][x + y] |= 1 << x;
 	incremental_eval += table_f[subscript_ad[x + y]];
 }
 void __forceinline bit_makemove(move_t& move, char color){
 	bit_makemove(move.x, move.y, color);
 }
 void __forceinline bit_unmakemove(int x, int y, char color){
-	bitboard[color - 1][x] &= ~(1 << y);
 	incremental_eval -= table_f[subscript[x]];
 	subscript[x] -= poweru3[y] << (color - 1);
-	incremental_eval += table_f[subscript[x]];
-
-	bitboard_h[color - 1][y] &= ~(1 << x);
 	incremental_eval -= table_f[subscript_h[y]];
 	subscript_h[y] -= poweru3[x] << (color - 1);
-	incremental_eval += table_f[subscript_h[y]];
-	
-	bitboard_d[color - 1][14 - x + y] &= ~(1 << x);
 	incremental_eval -= table_f[subscript_d[14 - x + y]];
 	subscript_d[14 - x + y] -= poweru3[x] << (color - 1);
-	incremental_eval += table_f[subscript_d[14 - x + y]];
-
-	bitboard_ad[color - 1][x + y] &= ~(1 << x);
 	incremental_eval -= table_f[subscript_ad[x + y]];
 	subscript_ad[x + y] -= poweru3[x] << (color - 1);
+	bitboard[color - 1][x] &= ~(1 << y);
+	incremental_eval += table_f[subscript[x]];
+	bitboard_h[color - 1][y] &= ~(1 << x);
+	incremental_eval += table_f[subscript_h[y]];
+	bitboard_d[color - 1][14 - x + y] &= ~(1 << x);
+	incremental_eval += table_f[subscript_d[14 - x + y]];
+	bitboard_ad[color - 1][x + y] &= ~(1 << x);
 	incremental_eval += table_f[subscript_ad[x + y]];
 }
 void __forceinline bit_unmakemove(move_t& move, char color){
@@ -217,22 +216,92 @@ void bit_copyboard(){
 
 // Cut the idle / occupied board out of move generator.
 void bit_cutidle(){
-	int x;
-	memset(bitboard_mc, 0, sizeof(uint16_t)* 16);
-	for (x = 1; x < 15; x++){
-		bitboard_mc[x] |= 0x7fff & (bitboard[0][x - 1] | (bitboard[0][x - 1] << 1) | (bitboard[0][x - 1] >> 1));
-		bitboard_mc[x] |= 0x7fff & (bitboard[1][x - 1] | (bitboard[1][x - 1] << 1) | (bitboard[1][x - 1] >> 1));
-	}
-	for (x = 0; x < 14; x++){
-		bitboard_mc[x] |= 0x7fff & (bitboard[0][x + 1] | (bitboard[0][x + 1] << 1) | (bitboard[0][x + 1] >> 1));
-		bitboard_mc[x] |= 0x7fff & (bitboard[1][x + 1] | (bitboard[1][x + 1] << 1) | (bitboard[1][x + 1] >> 1));
-	}
-	for (x = 0; x < 15; x++){
-		bitboard_mc[x] |= 0x7fff & (bitboard[0][x] << 1) | (bitboard[0][x] >> 1);
-		bitboard_mc[x] |= 0x7fff & (bitboard[1][x] << 1) | (bitboard[1][x] >> 1);
-		bitboard_mc[x] &= ~bitboard[0][x];
-		bitboard_mc[x] &= ~bitboard[1][x];
-	}
+
+	/*
+		To somebody who want to know how KS works:
+
+		SIMD code is hard to read for programmer, but (at most time) significantly faster.
+		You don't need to be sure about how the extremely weired code below works, if you aren't.
+		Just remember what it does and use it as a library function, since once such a function
+		is written and tuned, there is almost no reasons to modify it.
+		Same to other SSE2 version functions.
+
+		This will help you better understand:
+		_mm_<func>_<domain>
+			srli = shift, right, logical, integral
+			slli = shift, left , logical, integral
+			si128 : signed integral 128 bit, the whole XMM register.
+			epi16 : treat whole XMM register as 8 * 16bit signed integral.
+	*/
+	
+	__m128i xmm2, xmm3, xmm4, xmml, xmmr;
+	const __m128i xmmmask = _mm_set1_epi16(0x7fff);
+
+	xmml = _mm_or_si128(_mm_load_si128((__m128i*)&bitboard[0][0]), _mm_load_si128((__m128i*)&bitboard[1][0]));
+	xmmr = _mm_or_si128(_mm_load_si128((__m128i*)&bitboard[0][8]), _mm_load_si128((__m128i*)&bitboard[1][8]));
+
+	xmm3 = _mm_or_si128(_mm_srli_epi16(xmml, 1), _mm_slli_epi16(xmml, 1));
+	xmm2 = _mm_srli_si128(xmml, 2);
+	xmm2 = _mm_or_si128(xmm2, _mm_or_si128(_mm_srli_epi16(xmm2, 1), _mm_slli_epi16(xmm2, 1)));
+	xmm3 = _mm_or_si128(xmm3, xmm2);
+	xmm2 = _mm_slli_si128(xmml, 2);
+	xmm2 = _mm_or_si128(xmm2, _mm_or_si128(_mm_srli_epi16(xmm2, 1), _mm_slli_epi16(xmm2, 1)));
+	xmm3 = _mm_or_si128(xmm3, xmm2);
+	xmm2 = _mm_srli_si128(xmml, 14);
+	xmm4 = _mm_or_si128(xmm2, _mm_or_si128(_mm_srli_epi16(xmm2, 1), _mm_slli_epi16(xmm2, 1)));
+	
+	xmm4 = _mm_or_si128(xmm4, _mm_or_si128(_mm_srli_epi16(xmmr, 1), _mm_slli_epi16(xmmr, 1)));
+	xmm2 = _mm_srli_si128(xmmr, 2);
+	xmm2 = _mm_or_si128(xmm2, _mm_or_si128(_mm_srli_epi16(xmm2, 1), _mm_slli_epi16(xmm2, 1)));
+	xmm4 = _mm_or_si128(xmm4, xmm2);
+	xmm2 = _mm_slli_si128(xmmr, 2);
+	xmm2 = _mm_or_si128(xmm2, _mm_or_si128(_mm_srli_epi16(xmm2, 1), _mm_slli_epi16(xmm2, 1)));
+	xmm4 = _mm_or_si128(xmm4, xmm2);
+	xmm2 = _mm_slli_si128(xmmr, 14);
+	xmm2 = _mm_or_si128(xmm2, _mm_or_si128(_mm_srli_epi16(xmm2, 1), _mm_slli_epi16(xmm2, 1)));
+	xmm3 = _mm_or_si128(xmm3, xmm2);
+	
+	xmm4 = _mm_and_si128(xmm4, xmmmask);
+	xmm3 = _mm_and_si128(xmm3, xmmmask);
+	
+	/*
+	**
+		This comment block is an expansion from 3*3 nei-cut to 5*5 nei-cut.
+		It is helpful when a threaten is outside KS's 3*3 scope, but it will ruin the start phase.
+		So it is disabled yet. If you made a 4-3 threaten and KS failed to answer, it's a known issue,
+		which should get fixed in next release.
+		This block has bug. Tune it before use it.
+	*
+	__m128i xmm0;
+	xmm2 = _mm_srli_si128(xmm4, 2);
+	xmm0 = _mm_slli_si128(xmm4, 2);
+	xmm4 = _mm_or_si128(xmm4, _mm_or_si128(_mm_srli_epi16(xmm4, 1), _mm_slli_epi16(xmm4, 1)));
+	xmm2 = _mm_or_si128(xmm2, _mm_or_si128(_mm_srli_epi16(xmm2, 1), _mm_slli_epi16(xmm2, 1)));
+	xmm0 = _mm_or_si128(xmm0, _mm_or_si128(_mm_srli_epi16(xmm0, 1), _mm_slli_epi16(xmm0, 1)));
+	xmm4 = _mm_or_si128(xmm4, _mm_or_si128(xmm0, xmm2));
+	xmm2 = _mm_srli_si128(xmm4, 14);
+	xmm2 = _mm_or_si128(xmm2, _mm_or_si128(_mm_srli_epi16(xmm2, 1), _mm_slli_epi16(xmm2, 1)));
+	xmm3 = _mm_or_si128(xmm3, xmm2);
+
+	xmm2 = _mm_srli_si128(xmm3, 2);
+	xmm0 = _mm_slli_si128(xmm3, 2);
+	xmm3 = _mm_or_si128(xmm3, _mm_or_si128(_mm_srli_epi16(xmm3, 1), _mm_slli_epi16(xmm3, 1)));
+	xmm2 = _mm_or_si128(xmm2, _mm_or_si128(_mm_srli_epi16(xmm2, 1), _mm_slli_epi16(xmm2, 1)));
+	xmm0 = _mm_or_si128(xmm0, _mm_or_si128(_mm_srli_epi16(xmm0, 1), _mm_slli_epi16(xmm0, 1)));
+	xmm3 = _mm_or_si128(xmm3, _mm_or_si128(xmm0, xmm2));
+	xmm2 = _mm_srli_si128(xmm3, 14);
+	xmm2 = _mm_or_si128(xmm2, _mm_or_si128(_mm_srli_epi16(xmm2, 1), _mm_slli_epi16(xmm2, 1)));
+	xmm4 = _mm_or_si128(xmm4, xmm2);
+	
+	xmm3 = _mm_and_si128(xmm3, xmmmask);
+	xmm4 = _mm_and_si128(xmm4, xmmmask);
+	*/
+
+	xmm3 = _mm_andnot_si128(xmml, xmm3);
+	xmm4 = _mm_andnot_si128(xmmr, xmm4);
+
+	_mm_store_si128((__m128i*)&bitboard_mc[0], xmm3);
+	_mm_store_si128((__m128i*)&bitboard_mc[8], xmm4);
 }
 
 // Generate hash key.
@@ -670,13 +739,13 @@ int32_t fork_subthread(bool* ready, move_t move,
 	*ready = 1;
 
 	// Set up.
-#if defined(USE_TT)
-	key = k ^ zobrist[color - 1][x][y];
-#endif
 	int32_t reg;
 	char color = (who2move > 0 ? 1 : 2);
 	int x = move.x;
 	int y = move.y;
+#if defined(USE_TT)
+	key = k ^ zobrist[color - 1][x][y];
+#endif
 
 	// Make move.
 	bit_makemove(x, y, color);
@@ -707,6 +776,8 @@ int32_t __fastcall alpha_beta(int32_t alpha, int32_t beta, int depth, int who2mo
 	char color = (who2move > 0 ? 1 : 2);
 	int alpha_raised = 0;
 	bool ready = 0;
+
+	node++;
 
 	if (depth){
 #if defined(USE_TT)
@@ -753,8 +824,7 @@ int32_t __fastcall alpha_beta(int32_t alpha, int32_t beta, int depth, int who2mo
 			y = mlist[i].y;
 
 			// If there's an idle CPU, try fork a sub thread.
-			// Only fork PV node.
-			if (0 && is_pv && i >= 1 && ltc < ccpu && depth > 4 && forked_move < 16){
+			if (is_pv && i >= 1 && ltc < ccpu && depth > 6 && i < count - ltc && forked_move < 16){
 				ltclock.lock();
 				if (ltc < ccpu){
 					ltc++;
@@ -789,7 +859,7 @@ int32_t __fastcall alpha_beta(int32_t alpha, int32_t beta, int depth, int who2mo
 			else if (!alpha_raised)
 				reg = -alpha_beta(-beta, -alpha, depth - 1, -who2move, 1);
 			else{
-				reg = -alpha_beta(-alpha - 1, -alpha, depth - 1, -who2move, 0);
+				reg = -alpha_beta(-alpha - 1, -alpha + 1, depth - 1, -who2move, 0);
 				if (reg > alpha && reg < beta)
 					reg = -alpha_beta(-beta, -alpha, depth - 1, -who2move, 1);
 			}
@@ -838,7 +908,6 @@ int32_t __fastcall alpha_beta(int32_t alpha, int32_t beta, int depth, int who2mo
 		return alpha;
 	}
 	else{
-		node++;
 		/* Depth == 0: call evaluation function. */
 		reg = who2move * incremental_eval;
 		return reg;
@@ -890,22 +959,25 @@ void thread_body(int maxdepth){
 				reg = -alpha_beta(-SCORE_WIN, -localm - 1, maxdepth, -1, 1);
 		}
 		
+		if (time_out)
+			return;
+
+#if defined(USE_LOG)
 		char* app = (char*)alloca(256);
 		sprintf(app, "move(%d,%d), maxd %d, score %08X\n", x, y, maxdepth, reg);
 		strcat(debug_str, app);
+#endif
+
 		mp->score = -reg; // move_sort do descending, but we need a ascending sort.
 
 		tlock.lock();
-		if (reg > m || mx == 0xfe){
+		if (reg > m){
 			m = reg;
 			mx = x;
 			my = y;
 		}
 		tlock.unlock();
 		bit_unmakemove(x, y, 1);
-
-		if (time_out)
-			return;
 	}
 
 }
@@ -932,7 +1004,10 @@ void ai_run(){
 	int bx = 0xfe;
 	int by = 0xfe;
 	bit_copyboard();
-	debug_str = (char*)malloc(534288);
+
+#if defined(USE_LOG)
+	debug_str = (char*)calloc(1,534288);
+#endif
 
 #if defined(USE_TT)
 	// Probe TT.
@@ -1007,7 +1082,6 @@ void ai_run(){
 	// Set up a timer.
 	std::thread* timer = new std::thread(thread_timer);
 	timer->detach();
-	int cx, cy;
 
 	// Iterative deeping.
 	int maxdepth = 0;
@@ -1019,17 +1093,16 @@ void ai_run(){
 		move_t* mp;
 		if (!getmove(x, y, &mp))
 			return;
-		cx = mx;
-		cy = my;
 		mx = x;
 		my = y;
 		bit_makemove(x, y, 1);
 #if defined(USE_TT)
 		key ^= zobrist[0][x][y];
 #endif
-		ltc++;
+		ltc = 1;
 		m = -alpha_beta(-SCORE_WIN, -SCORE_LOSE, maxdepth, -1, 1);
-		
+
+#if defined(USE_LOG)
 		char* app = (char*)alloca(256);
 		for (int dei = 0; dei < mvcount; dei++){
 			sprintf(app, "SORT (%d,%d) - %08X\n", msa[dei].x, msa[dei].y, msa[dei].score);
@@ -1037,13 +1110,14 @@ void ai_run(){
 		}
 		sprintf(app, "OLDBRO move(%d,%d), maxd %d, score %08X\n", x, y, maxdepth, m);
 		strcat(debug_str, app);
+#endif
 
 		mp->score = -m;
 		bit_unmakemove(x, y, 1);
 #if defined(USE_TT)
 		key ^= zobrist[0][x][y];
 #endif
-		// Young brother start.
+		// Young brother starts.
 		ltc = 0;
 		for (x = 0; x < ccpu; x++)
 			thm[tid++] = new std::thread(thread_body, maxdepth);
@@ -1071,17 +1145,17 @@ void ai_run(){
 	TerminateThread(timer->native_handle(), 0);
 	delete timer;
 
+#if defined(USE_LOG)
 	char* app = (char*)alloca(256);
-	sprintf(app, "choose move(%d,%d).\n", cx, cy);
+	sprintf(app, "choose move(%d,%d).\n", mx, my);
 	strcat(debug_str, app);
 
 	FILE* f = fopen("debuglog.txt", "w");
 	fprintf(f, debug_str);
 	delete debug_str;
 	fclose(f);
+#endif
 
 	// Make the actual move.
-	mainboard[cx][cy] = 1;
-	mx = cx;
-	my = cy;
+	mainboard[mx][my] = 1;
 }
