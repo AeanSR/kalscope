@@ -99,6 +99,7 @@ static int poweru3[16] = {
 // Structure for result reduce.
 int32_t m;
 int my, mx = 0xfe;
+int maxdepth = 0;
 
 // Structure for thread sync.
 std::mutex tlock;
@@ -542,7 +543,7 @@ int move_gen(move_t* movelist, hash_t* h, int color, int depth){
 	uint64_t k;
 
 	// Probe TT to see if a best move was recorded.
-	if (h->key == key && h->type && h->x != 0xfe){
+	if (h && h->key == key && h->type && h->x != 0xfe){
 		hx = h->x;
 		hy = h->y;
 		// If the space is occupied, ignore it.
@@ -583,7 +584,7 @@ int move_gen(move_t* movelist, int color, int depth){
 				}
 #if defined(USE_TT)
 				if ((x ^ hx) | (y ^ hy)) {
-					if (depth < 3){
+					if (depth < 4){
 #endif
 						movelist[count].x = x;
 						movelist[count].y = y;
@@ -621,6 +622,8 @@ int move_gen(move_t* movelist, int color, int depth){
 			lookfor_threat = 0;
 			goto look_again;
 		}
+		else if (count == 0)
+				return 0;
 		// Sort.
 		move_sort(movelist, 0, count - 1);
 	}
@@ -711,15 +714,26 @@ int32_t __fastcall alpha_beta(int32_t alpha, int32_t beta, int depth, int who2mo
 
 	node++;
 
-	if (depth){
+	if (depth == 0){
+
+		/* Depth == 0: call evaluation function. */
+		reg = who2move * incremental_eval;
+		return reg;
+
+	}else{
 #if defined(USE_TT)
-		// Probe TT. We don't use stream load since the recently probed TT may hit again soon.
-		hash_t* h = &hash_table[key & HASH_SIZE];
-		hash_t __declspec(align(16)) tt;
-		register __m128i xmm = _mm_load_si128((__m128i*)h);
-		h = &tt;
-		_mm_store_si128((__m128i*)h, xmm);
-		bool found = (h->key == key);
+		bool found = 0;
+		hash_t* h = NULL;
+
+		if (depth > 1){
+			// Probe TT. We don't use stream load since the recently probed TT may hit again soon.
+			h = &hash_table[key & HASH_SIZE];
+			hash_t __declspec(align(16)) tt;
+			register __m128i xmm = _mm_load_si128((__m128i*)h);
+			h = &tt;
+			_mm_store_si128((__m128i*)h, xmm);
+			found = (h->key == key);
+		}
 
 		// If TT returned a deeper history result, use it.
 		if (found && h->depth >= depth){
@@ -743,6 +757,13 @@ int32_t __fastcall alpha_beta(int32_t alpha, int32_t beta, int depth, int who2mo
 #else
 		int count = move_gen(mlist, color, depth);
 #endif
+
+		// If move generator suggested stop at here, return a evaluation.
+		if (count == 0){
+			reg = who2move * incremental_eval;
+			return reg;
+		}
+
 		// Fork sub threads when appropriate.
 		int forked_move = 0;
 		std::future<int32_t> forked_return[16];
@@ -837,11 +858,6 @@ int32_t __fastcall alpha_beta(int32_t alpha, int32_t beta, int depth, int who2mo
 		else record_hash(alpha, 0xfe, 0xfe, TYPE_A, depth);
 #endif
 		return alpha;
-	}
-	else{
-		/* Depth == 0: call evaluation function. */
-		reg = who2move * incremental_eval;
-		return reg;
 	}
 }
 
@@ -1015,7 +1031,7 @@ void ai_run(){
 	timer->detach();
 
 	// Iterative deeping.
-	int maxdepth = 0;
+	maxdepth = 0;
 	while (!time_out){
 		msp = mvcount;
 		move_sort(msa, 0, mvcount - 1);
