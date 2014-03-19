@@ -15,7 +15,7 @@
 
 // Preprocessed macros to control KS ability.
 #define USE_TT	// Use transpose table or not
-#undef  USE_LOG	// Use debug log file or not
+#define  USE_LOG	// Use debug log file or not
 
 // State globals shared to interface.
 static const char codename_str[] = "AI Kernel \"Dolanaar\" 2014Mar.";
@@ -45,10 +45,7 @@ uint64_t node = 0;
 // Structure for TT.
 enum{
 	TYPE_NON = 0, TYPE_PV = 1, TYPE_A = 2, TYPE_B = 3,
-	EVALW_NON = 16, EVALW_WIN = 17, EVALW_LOSE = 18,
 };
-#define eval_stype(h) (0,((h)->type & 0xf))
-#define eval_wtype(h) (0,((h)->type >> 4 ))
 typedef struct{
 	uint64_t key;
 	int32_t value;
@@ -84,14 +81,13 @@ std::mutex msl;
 char mainboard[16][16] = { 0 };
 __declspec(thread, align(16)) uint16_t bitboard[2][16] = { 0 };
 __declspec(thread, align(16)) uint16_t bitboard_mc[16] = { 0 };
-__declspec(thread, align(16)) uint16_t bitboard_h[2][16] = { 0 };
-__declspec(thread, align(16)) uint16_t bitboard_d[2][32] = { 0 };
-__declspec(thread, align(16)) uint16_t bitboard_ad[2][32] = { 0 };
 
 // Structure for evaluate lookup table.
 static int32_t* table_f = NULL;
 static int init_flag = 0;
 __declspec(thread) int32_t incremental_eval = SCORE_BASE;
+__declspec(thread) int32_t incremental_win = 0;
+__declspec(thread) int32_t backup_incwin = 0;
 __declspec(thread, align(16)) int subscript[16] = { 0 };
 __declspec(thread, align(16)) int subscript_h[16] = { 0 };
 __declspec(thread, align(16)) int subscript_d[32] = { 0 };
@@ -144,47 +140,97 @@ size_t memory_to_use(){
 #endif
 
 // Make / Unmake a move on bit board, and host the incremental evalutation.
-void __forceinline bit_makemove(int x, int y, char color){
-	incremental_eval -= table_f[subscript[x]];
-	subscript[x] += poweru3[y] << (color - 1);
-	incremental_eval -= table_f[subscript_h[y]];
-	subscript_h[y] += poweru3[x] << (color - 1);
-	incremental_eval -= table_f[subscript_d[14 - x + y]];
-	subscript_d[14 - x + y] += poweru3[x] << (color - 1);
-	incremental_eval -= table_f[subscript_ad[x + y]];
-	subscript_ad[x + y] += poweru3[x] << (color - 1);
-	bitboard[color - 1][x] |= 1 << y;
-	incremental_eval += table_f[subscript[x]];
-	bitboard_h[color - 1][y] |= 1 << x;
-	incremental_eval += table_f[subscript_h[y]];
-	bitboard_d[color - 1][14 - x + y] |= 1 << x;
-	incremental_eval += table_f[subscript_d[14 - x + y]];
-	bitboard_ad[color - 1][x + y] |= 1 << x;
-	incremental_eval += table_f[subscript_ad[x + y]];
+void __forceinline bit_makemove(int x, int y, char color, bool need_b, bool need_e, bool need_w){
+	/*
+		Since this is a force inlined function, the parameters 'need_x' ( if given constant )
+		indicate which 'if' blocks can be ignored at compile time. No actural branches.
+		If you give some variant value, the code will come up with branches. You should try
+		to rewrite this function as template / override approach.
+	*/
+	if (need_e){
+		incremental_eval -= table_f[subscript[x]];
+		incremental_eval -= table_f[subscript_h[y]];
+		incremental_eval -= table_f[subscript_d[14 - x + y]];
+		incremental_eval -= table_f[subscript_ad[x + y]];
+	}
+	if (need_e || need_w){
+		subscript[x] += poweru3[y] << (color - 1);
+		subscript_h[y] += poweru3[x] << (color - 1);
+		subscript_d[14 - x + y] += poweru3[x] << (color - 1);
+		subscript_ad[x + y] += poweru3[x] << (color - 1);
+	}
+	if (need_b){
+		bitboard[color - 1][x] |= 1 << y;
+	}
+	if (need_e){
+		incremental_eval += table_f[subscript[x]];
+		incremental_eval += table_f[subscript_h[y]];
+		incremental_eval += table_f[subscript_d[14 - x + y]];
+		incremental_eval += table_f[subscript_ad[x + y]];
+	}
+	if (need_w){
+		backup_incwin = incremental_win;
+		incremental_win = incremental_win || (table_f[subscript[x]] & 0x7fffffff) == SCORE_WIN || (table_f[subscript_h[y]] & 0x7fffffff) == SCORE_WIN
+			|| (table_f[subscript_d[14 - x + y]] & 0x7fffffff) == SCORE_WIN || (table_f[subscript_ad[x + y]] & 0x7fffffff) == SCORE_WIN;
+
+	}
 }
-void __forceinline bit_makemove(move_t& move, char color){
-	bit_makemove(move.x, move.y, color);
+void __forceinline bit_makemove(move_t& move, char color, bool need_b, bool need_e, bool need_w){
+	bit_makemove(move.x, move.y, color, need_b, need_e, need_w);
 }
-void __forceinline bit_unmakemove(int x, int y, char color){
-	incremental_eval -= table_f[subscript[x]];
-	subscript[x] -= poweru3[y] << (color - 1);
-	incremental_eval -= table_f[subscript_h[y]];
-	subscript_h[y] -= poweru3[x] << (color - 1);
-	incremental_eval -= table_f[subscript_d[14 - x + y]];
-	subscript_d[14 - x + y] -= poweru3[x] << (color - 1);
-	incremental_eval -= table_f[subscript_ad[x + y]];
-	subscript_ad[x + y] -= poweru3[x] << (color - 1);
-	bitboard[color - 1][x] &= ~(1 << y);
-	incremental_eval += table_f[subscript[x]];
-	bitboard_h[color - 1][y] &= ~(1 << x);
-	incremental_eval += table_f[subscript_h[y]];
-	bitboard_d[color - 1][14 - x + y] &= ~(1 << x);
-	incremental_eval += table_f[subscript_d[14 - x + y]];
-	bitboard_ad[color - 1][x + y] &= ~(1 << x);
-	incremental_eval += table_f[subscript_ad[x + y]];
+void __forceinline bit_unmakemove(int x, int y, char color, bool need_b, bool need_e, bool need_w){
+	if (need_e){
+		incremental_eval -= table_f[subscript[x]];
+		incremental_eval -= table_f[subscript_h[y]];
+		incremental_eval -= table_f[subscript_d[14 - x + y]];
+		incremental_eval -= table_f[subscript_ad[x + y]];
+	}
+	if (need_e||need_w){
+		subscript[x] -= poweru3[y] << (color - 1);
+		subscript_h[y] -= poweru3[x] << (color - 1);
+		subscript_d[14 - x + y] -= poweru3[x] << (color - 1);
+		subscript_ad[x + y] -= poweru3[x] << (color - 1);
+	}
+	if (need_b){
+		bitboard[color - 1][x] &= ~(1 << y);
+	}
+	if (need_e){
+		incremental_eval += table_f[subscript[x]];
+		incremental_eval += table_f[subscript_h[y]];
+		incremental_eval += table_f[subscript_d[14 - x + y]];
+		incremental_eval += table_f[subscript_ad[x + y]];
+	}
+	if (need_w){
+		incremental_win = backup_incwin;
+	}
 }
-void __forceinline bit_unmakemove(move_t& move, char color){
-	bit_unmakemove(move.x, move.y, color);
+void __forceinline bit_unmakemove(move_t& move, char color, bool need_b, bool need_e, bool need_w){
+	bit_unmakemove(move.x, move.y, color, need_b, need_e, need_w);
+}
+
+// Evaluation function ( Only called on start ).
+void eval_s(){
+	int x;
+	static const __m128i xmm0 = _mm_setzero_si128();
+	int32_t score = SCORE_BASE;
+	incremental_win = 0;
+	for (x = 0; x < 15; x++){
+		score += table_f[subscript[x]];
+		incremental_win |= abs32(table_f[subscript[x]]) >= SCORE_WIN ;
+		score += table_f[subscript_h[x]];
+		incremental_win |= abs32(table_f[subscript_h[x]]) >= SCORE_WIN;
+		score += table_f[subscript_d[x]];
+		incremental_win |= abs32(table_f[subscript_d[x]]) >= SCORE_WIN;
+		score += table_f[subscript_ad[x]];
+		incremental_win |= abs32(table_f[subscript_ad[x]]) >= SCORE_WIN;
+	}
+	for (x = 15; x < 30; x++){
+		score += table_f[subscript_d[x]];
+		incremental_win |= abs32(table_f[subscript_d[x]]) >= SCORE_WIN;
+		score += table_f[subscript_ad[x]];
+		incremental_win |= abs32(table_f[subscript_ad[x]]) >= SCORE_WIN;
+	}
+	incremental_eval = score;
 }
 
 // Copy mainboard to bitboard.
@@ -193,23 +239,18 @@ void bit_copyboard(){
 	char b;
 	memset(bitboard[0], 0, sizeof(uint16_t)* 16);
 	memset(bitboard[1], 0, sizeof(uint16_t)* 16);
-	memset(bitboard_h[0], 0, sizeof(uint16_t)* 16);
-	memset(bitboard_h[1], 0, sizeof(uint16_t)* 16);
-	memset(bitboard_d[0], 0, sizeof(uint16_t)* 16);
-	memset(bitboard_d[1], 0, sizeof(uint16_t)* 16);
-	memset(bitboard_ad[0], 0, sizeof(uint16_t)* 16);
-	memset(bitboard_ad[1], 0, sizeof(uint16_t)* 16);
 	memset(subscript, 0, sizeof(int)* 16);
 	memset(subscript_h, 0, sizeof(int)* 16);
 	memset(subscript_d, 0, sizeof(int)* 32);
 	memset(subscript_ad, 0, sizeof(int)* 32);
 	incremental_eval = SCORE_BASE;
+	incremental_win = 0;
 
 	for (x = 0; x < 15; x++)
 		for (y = 0; y < 15; y++){
 			b = mainboard[x][y];
 			if (b){
-				bit_makemove(x, y, b);
+				bit_makemove(x, y, b, 1, 1, 1);
 			}
 		}
 }
@@ -343,98 +384,11 @@ void __fastcall record_hash(int32_t score, int x = 0xfe, int y = 0xfe, int type 
 	p->value = score;
 	p->x = x;
 	p->y = y;
-	p->type = (p->type & 0xf0) | type;
+	p->type = type;
 	p->depth = depth;
 	hlock[key % 1024].unlock();
 }
 #endif
-
-// Judge if win /lose by SSE2 instructions.
-#if defined(USE_TT)
-char eval_w(hash_t* h = NULL){
-	if (h){
-		char type = eval_wtype(h) & 3;
-		switch (type){
-		case 0: break;
-		default: return type - 1;
-		}
-	}
-#else
-char eval_w(){
-#endif
-	char result = 0;
-	int c;
-	__m128i xmm1, xmm2, xmm3, xmm4;
-	__m128i xmm0 = _mm_set1_epi16(0x1f);
-	__m128i xmm7 = _mm_setzero_si128();
-	for (c = 0; c < 2; c++){
-		xmm1 = _mm_load_si128((__m128i*)&bitboard[c][0]);
-		xmm3 = _mm_load_si128((__m128i*)&bitboard[c][8]);
-		while (0x7fff & ~_mm_movemask_epi8(_mm_cmpeq_epi16(xmm7, _mm_or_si128(xmm1, xmm3)))){
-			xmm2 = _mm_and_si128(xmm0, xmm1);
-			xmm4 = _mm_and_si128(xmm0, xmm3);
-			if (_mm_movemask_epi8(_mm_or_si128(_mm_cmpeq_epi16(xmm2, xmm0), _mm_cmpeq_epi16(xmm4, xmm0)))){
-				result = c + 1;
-				goto evalw_return;
-			}
-			xmm1 = _mm_srli_epi16(xmm1, 1);
-			xmm3 = _mm_srli_epi16(xmm3, 1);
-		}
-		xmm1 = _mm_load_si128((__m128i*)&bitboard_h[c][0]);
-		xmm3 = _mm_load_si128((__m128i*)&bitboard_h[c][8]);
-		while (0x7fff & ~_mm_movemask_epi8(_mm_cmpeq_epi16(xmm7, _mm_or_si128(xmm1, xmm3)))){
-			xmm2 = _mm_and_si128(xmm0, xmm1);
-			xmm4 = _mm_and_si128(xmm0, xmm3);
-			if (_mm_movemask_epi8(_mm_or_si128(_mm_cmpeq_epi16(xmm2, xmm0), _mm_cmpeq_epi16(xmm4, xmm0)))){
-				result = c + 1;
-				goto evalw_return;
-			}
-			xmm1 = _mm_srli_epi16(xmm1, 1);
-			xmm3 = _mm_srli_epi16(xmm3, 1);
-		}
-		xmm1 = _mm_loadu_si128((__m128i*)&bitboard_d[c][4]);
-		xmm3 = _mm_loadu_si128((__m128i*)&bitboard_ad[c][4]);
-		while (0x7fff & ~_mm_movemask_epi8(_mm_cmpeq_epi16(xmm7, _mm_or_si128(xmm1, xmm3)))){
-			xmm2 = _mm_and_si128(xmm0, xmm1);
-			xmm4 = _mm_and_si128(xmm0, xmm3);
-			if (_mm_movemask_epi8(_mm_or_si128(_mm_cmpeq_epi16(xmm2, xmm0), _mm_cmpeq_epi16(xmm4, xmm0)))){
-				result = c + 1;
-				goto evalw_return;
-			}
-			xmm1 = _mm_srli_epi16(xmm1, 1);
-			xmm3 = _mm_srli_epi16(xmm3, 1);
-		}
-		xmm1 = _mm_loadu_si128((__m128i*)&bitboard_d[c][12]);
-		xmm3 = _mm_loadu_si128((__m128i*)&bitboard_ad[c][12]);
-		while (0x7fff & ~_mm_movemask_epi8(_mm_cmpeq_epi16(xmm7, _mm_or_si128(xmm1, xmm3)))){
-			xmm2 = _mm_and_si128(xmm0, xmm1);
-			xmm4 = _mm_and_si128(xmm0, xmm3);
-			if (_mm_movemask_epi8(_mm_or_si128(_mm_cmpeq_epi16(xmm2, xmm0), _mm_cmpeq_epi16(xmm4, xmm0)))){
-				result = c + 1;
-				goto evalw_return;
-			}
-			xmm1 = _mm_srli_epi16(xmm1, 1);
-			xmm3 = _mm_srli_epi16(xmm3, 1);
-		}
-		xmm1 = _mm_loadu_si128((__m128i*)&bitboard_d[c][20]);
-		xmm3 = _mm_loadu_si128((__m128i*)&bitboard_ad[c][20]);
-		while (0x7fff & ~_mm_movemask_epi8(_mm_cmpeq_epi16(xmm7, _mm_or_si128(xmm1, xmm3)))){
-			xmm2 = _mm_and_si128(xmm0, xmm1);
-			xmm4 = _mm_and_si128(xmm0, xmm3);
-			if (_mm_movemask_epi8(_mm_or_si128(_mm_cmpeq_epi16(xmm2, xmm0), _mm_cmpeq_epi16(xmm4, xmm0)))){
-				result = c + 1;
-				goto evalw_return;
-			}
-			xmm1 = _mm_srli_epi16(xmm1, 1);
-			xmm3 = _mm_srli_epi16(xmm3, 1);
-		}
-	}
-evalw_return:
-#if defined(USE_TT)
-	if (h) h->type |= result + 1;
-#endif
-	return result;
-}
 
 // Judge if draw.
 char eval_draw(){
@@ -548,24 +502,6 @@ void init_table(){
 	init_finished++;
 }
 
-// Evaluation function.
-int32_t eval_s(){
-	int x;
-	static const __m128i xmm0 = _mm_setzero_si128();
-	int32_t score = SCORE_BASE;
-	for (x = 0; x < 15; x++){
-		score += table_f[subscript[x]];
-		score += table_f[subscript_h[x]];
-		score += table_f[subscript_d[x]];
-		score += table_f[subscript_ad[x]];
-	}
-	for (x = 15; x < 30; x++){
-		score += table_f[subscript_d[x]];
-		score += table_f[subscript_ad[x]];
-	}
-	return score;
-}
-
 // A quick-sort algorithm, nothing special.
 void __fastcall move_sort(move_t* movelist, int first, int last){
 	if (last - first > 1){
@@ -606,7 +542,7 @@ int move_gen(move_t* movelist, hash_t* h, int color, int depth){
 	uint64_t k;
 
 	// Probe TT to see if a best move was recorded.
-	if (h->key == key && eval_stype(h) && h->x != 0xfe){
+	if (h->key == key && h->type && h->x != 0xfe){
 		hx = h->x;
 		hy = h->y;
 		// If the space is occupied, ignore it.
@@ -636,9 +572,9 @@ int move_gen(move_t* movelist, int color, int depth){
 				_BitScanForward(&c, mask);
 				y = c;
 				if (lookfor_threat){
-					bit_makemove(x, y, color);
+					bit_makemove(x, y, color, 0, 1, 0);
 					val = incremental_eval;
-					bit_unmakemove(x, y, color);
+					bit_unmakemove(x, y, color, 0, 1, 0);
 					// If this move do not make a difference, ignore it.
 					if (abs32(val - score) == 0){
 						mask &= mask - 1;
@@ -718,28 +654,24 @@ int move_gen(move_t* movelist, int color, int depth){
 
 // Fork a child thread if not all processor are busy.
 int32_t fork_subthread(bool* ready, move_t move,
-	uint16_t bb[][16], uint16_t bbh[][16], uint16_t bbd[][32], uint16_t bbad[][32],
+	uint16_t bb[][16], int32_t incw, int32_t ince, int32_t bkincw,
 	int ss[], int ssh[], int ssd[], int ssad[],
 	uint64_t k, int32_t alpha, int32_t beta, int depth, int who2move)
 {
 	// Copy board from main.
 	memcpy(bitboard[0], bb[0], 32);
 	memcpy(bitboard[1], bb[1], 32);
-	memcpy(bitboard_h[0], bbh[0], 32);
-	memcpy(bitboard_h[1], bbh[1], 32);
-	memcpy(bitboard_d[0], bbd[0], 64);
-	memcpy(bitboard_d[1], bbd[1], 64);
-	memcpy(bitboard_ad[0], bbad[0], 64);
-	memcpy(bitboard_ad[1], bbad[1], 64);
 	memcpy(subscript, ss, 64);
 	memcpy(subscript_h, ssh, 64);
 	memcpy(subscript_d, ssd, 128);
 	memcpy(subscript_ad, ssad, 128);
-	incremental_eval = eval_s();
 	*ready = 1;
 
 	// Set up.
 	int32_t reg;
+	incremental_eval = ince;
+	incremental_win = incw;
+	backup_incwin = bkincw;
 	char color = (who2move > 0 ? 1 : 2);
 	int x = move.x;
 	int y = move.y;
@@ -748,7 +680,7 @@ int32_t fork_subthread(bool* ready, move_t move,
 #endif
 
 	// Make move.
-	bit_makemove(x, y, color);
+	bit_makemove(x, y, color, 1, 1, 1);
 
 	// Search.
 	reg = -alpha_beta(-alpha - 1, -alpha, depth - 1, -who2move, 0);
@@ -791,19 +723,17 @@ int32_t __fastcall alpha_beta(int32_t alpha, int32_t beta, int depth, int who2mo
 
 		// If TT returned a deeper history result, use it.
 		if (found && h->depth >= depth){
-			if (eval_stype(h) == TYPE_PV)
+			if (h->type == TYPE_PV)
 				return h->value;
-			else if (eval_stype(h) == TYPE_B && h->value >= beta){
+			else if (h->type == TYPE_B && h->value >= beta){
 				return beta;
-			}else if (eval_stype(h) == TYPE_A && h->value <= alpha)
+			}else if (h->type == TYPE_A && h->value <= alpha)
 				return alpha;
 		}
+#endif
 
 		// Call eval_w().
-		if (eval_w(found ? h : NULL))
-#else
-		if (eval_w())
-#endif
+		if (incremental_win)
 			return alpha;
 
 		// Generate all moves and sort.
@@ -831,7 +761,8 @@ int32_t __fastcall alpha_beta(int32_t alpha, int32_t beta, int depth, int who2mo
 					ltclock.unlock();
 					ready = 0;
 					forked_return[forked_move] = std::async(
-						fork_subthread, &ready, mlist[i], bitboard, bitboard_h, bitboard_d, bitboard_ad,
+						fork_subthread, &ready, mlist[i], bitboard,
+						incremental_win, incremental_eval, backup_incwin,
 						subscript, subscript_h, subscript_d, subscript_ad,
 #if defined(USE_TT)
 						key, alpha, beta, depth, who2move);
@@ -849,7 +780,7 @@ int32_t __fastcall alpha_beta(int32_t alpha, int32_t beta, int depth, int who2mo
 			}
 
 			// Make move.
-			bit_makemove(x, y, color);
+			bit_makemove(x, y, color, 1, 1, 1);
 #if defined(USE_TT)
 			key ^= zobrist[color - 1][x][y];
 #endif
@@ -865,7 +796,7 @@ int32_t __fastcall alpha_beta(int32_t alpha, int32_t beta, int depth, int who2mo
 			}
 
 			// Unmake Move.
-			bit_unmakemove(x, y, color);
+			bit_unmakemove(x, y, color, 1, 1, 1);
 #if defined(USE_TT)
 			key ^= zobrist[color - 1][x][y];
 #endif
@@ -943,7 +874,7 @@ void thread_body(int maxdepth){
 	int32_t reg;
 	move_t* mp;
 	while (getmove(x, y, &mp)){
-		bit_makemove(x, y, 1);
+		bit_makemove(x, y, 1, 1, 1, 1);
 #if defined(USE_TT)
 		key = zobrist_key();
 #endif
@@ -977,7 +908,7 @@ void thread_body(int maxdepth){
 			my = y;
 		}
 		tlock.unlock();
-		bit_unmakemove(x, y, 1);
+		bit_unmakemove(x, y, 1, 1, 1, 1);
 	}
 
 }
@@ -1013,7 +944,7 @@ void ai_run(){
 	// Probe TT.
 	uint64_t k = zobrist_key();
 	hash_t* h = &hash_table[k & (HASH_SIZE - 1)];
-	if (h->key == key && eval_stype(h)){
+	if (h->key == key && h->type){
 		bx = h->x;
 		by = h->y;
 		if (bx >= 15 || bx < 0 || by >= 15 || by < 0 || mainboard[bx][by] != 0){
@@ -1030,12 +961,12 @@ void ai_run(){
 		while (mask){
 			_BitScanForward(&c, mask);
 			y = c;
-			bit_makemove(x, y, 1);
-			if (eval_w()){
+			bit_makemove(x, y, 1, 0, 0, 1);
+			if (incremental_win){
 				mainboard[x][y] = 1;
 				return;
 			}
-			bit_unmakemove(x, y, 1);
+			bit_unmakemove(x, y, 1, 0, 0, 1);
 			mask &= mask - 1;
 		}
 	}
@@ -1044,12 +975,12 @@ void ai_run(){
 		while (mask){
 			_BitScanForward(&c, mask);
 			y = c;
-			bit_makemove(x, y, 2);
-			if (eval_w()){
+			bit_makemove(x, y, 2, 0, 0, 1);
+			if (incremental_win){
 				mainboard[x][y] = 1;
 				return;
 			}
-			bit_unmakemove(x, y, 2);
+			bit_unmakemove(x, y, 2, 0, 0, 1);
 			mask &= mask - 1;
 		}
 	}
@@ -1095,7 +1026,7 @@ void ai_run(){
 			return;
 		mx = x;
 		my = y;
-		bit_makemove(x, y, 1);
+		bit_makemove(x, y, 1, 1, 1, 1);
 #if defined(USE_TT)
 		key ^= zobrist[0][x][y];
 #endif
@@ -1113,7 +1044,7 @@ void ai_run(){
 #endif
 
 		mp->score = -m;
-		bit_unmakemove(x, y, 1);
+		bit_unmakemove(x, y, 1, 1, 1, 1);
 #if defined(USE_TT)
 		key ^= zobrist[0][x][y];
 #endif
