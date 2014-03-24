@@ -28,6 +28,7 @@ char* debug_str;
 static const int time_limit = 10000;
 volatile bool time_out = 0;
 uint64_t node = 0;
+__declspec(thread) uint64_t local_node = 0;
 
 // Some branch-less macros.
 #define sshr32(v,d) (-(int32_t)((uint32_t)(v) >> d))
@@ -669,9 +670,10 @@ int32_t fork_subthread(bool* ready, move_t move,
 	memcpy(subscript_d, ssd, 128);
 	memcpy(subscript_ad, ssad, 128);
 	*ready = 1;
-
+	
 	// Set up.
 	int32_t reg;
+	local_node = 0;
 	incremental_eval = ince;
 	incremental_win = incw;
 	backup_incwin = bkincw;
@@ -695,6 +697,10 @@ int32_t fork_subthread(bool* ready, move_t move,
 	ltc--;
 	ltclock.unlock();
 
+	tlock.lock();
+	node += local_node;
+	tlock.unlock();
+
 	return reg;
 }
 
@@ -712,7 +718,7 @@ int32_t __fastcall alpha_beta(int32_t alpha, int32_t beta, int depth, int who2mo
 	int alpha_raised = 0;
 	bool ready = 0;
 
-	node++;
+	local_node++;
 
 	if (depth == 0){
 
@@ -889,6 +895,7 @@ void thread_body(int maxdepth){
 	int32_t localm;
 	int32_t reg;
 	move_t* mp;
+	local_node = 0;
 	while (getmove(x, y, &mp)){
 		bit_makemove(x, y, 1, 1, 1, 1);
 #if defined(USE_TT)
@@ -906,8 +913,12 @@ void thread_body(int maxdepth){
 				reg = -alpha_beta(-SCORE_WIN, -localm - 1, maxdepth, -1, 1);
 		}
 		
-		if (time_out)
+		if (time_out){
+			tlock.lock();
+			node += local_node;
+			tlock.unlock();
 			return;
+		}
 
 #if defined(USE_LOG)
 		char* app = (char*)alloca(256);
@@ -926,6 +937,9 @@ void thread_body(int maxdepth){
 		tlock.unlock();
 		bit_unmakemove(x, y, 1, 1, 1, 1);
 	}
+	tlock.lock();
+	node += local_node;
+	tlock.unlock();
 
 }
 
@@ -946,6 +960,7 @@ void ai_run(){
 	mx = 0xfe;
 	msp = 0;
 	node = 0;
+	local_node = 0;
 	init_table();
 	int mvcount = 0;
 	int bx = 0xfe;
@@ -979,6 +994,8 @@ void ai_run(){
 			y = c;
 			bit_makemove(x, y, 1, 0, 0, 1);
 			if (incremental_win){
+				mx = x;
+				my = y;
 				mainboard[x][y] = 1;
 				return;
 			}
@@ -993,6 +1010,8 @@ void ai_run(){
 			y = c;
 			bit_makemove(x, y, 2, 0, 0, 1);
 			if (incremental_win){
+				mx = x;
+				my = y;
 				mainboard[x][y] = 1;
 				return;
 			}
@@ -1091,6 +1110,7 @@ void ai_run(){
 
 	TerminateThread(timer->native_handle(), 0);
 	delete timer;
+	node += local_node;
 
 #if defined(USE_LOG)
 	char* app = (char*)alloca(256);
