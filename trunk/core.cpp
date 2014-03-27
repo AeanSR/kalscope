@@ -943,6 +943,29 @@ void thread_body(int maxdepth){
 
 }
 
+// Alpha-beta wrapper for NPS statistic.
+int32_t alpha_beta_wrapper(uint16_t bb[][16], int32_t incw, int32_t ince, int32_t bkincw,
+int ss[], int ssh[], int ssd[], int ssad[],
+uint64_t k, int32_t alpha, int32_t beta, int depth, int who2move){
+	memcpy(bitboard[0], bb[0], 32);
+	memcpy(bitboard[1], bb[1], 32);
+	memcpy(subscript, ss, 64);
+	memcpy(subscript_h, ssh, 64);
+	memcpy(subscript_d, ssd, 128);
+	memcpy(subscript_ad, ssad, 128);
+	key = k;
+	incremental_eval = ince;
+	incremental_win = incw;
+	backup_incwin = bkincw;
+
+	local_node = 0;
+	int32_t ret = alpha_beta(alpha, beta, depth, who2move, 0);
+	tlock.lock();
+	node += local_node;
+	tlock.unlock();
+	return ret;
+}
+
 // A stopwatch controls max search time.
 void thread_timer(void){
 	std::chrono::milliseconds dur(time_limit);
@@ -1049,6 +1072,16 @@ void ai_run(){
 	std::thread* timer = new std::thread(thread_timer);
 	timer->detach();
 
+	// Old Brother's parallelism.
+	static std::future<int32_t>* obt = new std::future<int32_t>[ccpu*2];
+	static int32_t* tryslice = new int32_t[ccpu*2 + 1];
+	if (ccpu > 1){
+		for (size_t i = 0; i < ccpu; i++)
+			tryslice[i] = (int32_t)((double)SCORE_LOSE / pow(2.0, (9.0 * i / (double)ccpu)));
+		for (size_t i = ccpu + 1; i <= ccpu * 2; i++)
+			tryslice[i] = (int32_t)((double)SCORE_WIN / pow(2.0, (9.0 * (ccpu * 2 - i) / (double)ccpu)));
+		tryslice[ccpu] = 0;
+	}
 	// Iterative deeping.
 	maxdepth = 0;
 	while (!time_out){
@@ -1065,8 +1098,38 @@ void ai_run(){
 #if defined(USE_TT)
 		key ^= zobrist[0][x][y];
 #endif
-		ltc = 1;
-		m = -alpha_beta(-SCORE_WIN, -SCORE_LOSE, maxdepth, -1, 1);
+		
+		// Deal Old Brother in parallel.
+		int32_t ret;
+		if (ccpu == 1 || maxdepth < 8){
+			ltc = 1;
+			m = -alpha_beta(-SCORE_WIN, -SCORE_LOSE, maxdepth, -1, 1);
+		}
+		else{
+			ltc = ccpu;
+			for (int i = 0; i < ccpu; i++)
+				obt[i] = std::async(alpha_beta_wrapper, bitboard, incremental_win, incremental_eval, backup_incwin,
+				subscript, subscript_h, subscript_d, subscript_ad,
+				key, tryslice[i], tryslice[i + 1], maxdepth, -1);
+			for (int i = 0; i < ccpu; i++){
+				ret = obt[i].get();
+#ifdef USE_LOG
+				char* app = (char*)alloca(256);
+				sprintf(app, "SLICE %08X, %08X, %08X\n", tryslice[i], ret, tryslice[i+1]);
+				strcat(debug_str, app);
+#endif
+				ltclock.lock();
+				ltc--;
+				ltclock.unlock();
+				if (ret < tryslice[i + 1] && ret >= tryslice[i]){
+					m = -ret;
+					ltc = 0;
+					break;
+					
+				}
+				m = -tryslice[ccpu];
+			}
+		}
 
 #if defined(USE_LOG)
 		char* app = (char*)alloca(256);
