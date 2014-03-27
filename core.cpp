@@ -82,6 +82,7 @@ std::mutex msl;
 char mainboard[16][16] = { 0 };
 __declspec(thread, align(16)) uint16_t bitboard[2][16] = { 0 };
 __declspec(thread, align(16)) uint16_t bitboard_mc[16] = { 0 };
+__declspec(thread, align(16)) uint16_t bitboard_mc55[16] = { 0 };
 
 // Structure for evaluate lookup table.
 static int32_t* table_f = NULL;
@@ -306,45 +307,48 @@ void bit_cutidle(){
 	
 	xmm4 = _mm_and_si128(xmm4, xmmmask);
 	xmm3 = _mm_and_si128(xmm3, xmmmask);
-	
-	/*
-	**
-		This comment block is an expansion from 3*3 nei-cut to 5*5 nei-cut.
-		It is helpful when a threaten is outside KS's 3*3 scope, but it will ruin the start phase.
-		So it is disabled yet. If you made a 4-3 threaten and KS failed to answer, it's a known issue,
-		which should get fixed in next release.
-		This block has bug. Tune it before use it.
-	*
-	__m128i xmm0;
-	xmm2 = _mm_srli_si128(xmm4, 2);
-	xmm0 = _mm_slli_si128(xmm4, 2);
-	xmm4 = _mm_or_si128(xmm4, _mm_or_si128(_mm_srli_epi16(xmm4, 1), _mm_slli_epi16(xmm4, 1)));
-	xmm2 = _mm_or_si128(xmm2, _mm_or_si128(_mm_srli_epi16(xmm2, 1), _mm_slli_epi16(xmm2, 1)));
-	xmm0 = _mm_or_si128(xmm0, _mm_or_si128(_mm_srli_epi16(xmm0, 1), _mm_slli_epi16(xmm0, 1)));
-	xmm4 = _mm_or_si128(xmm4, _mm_or_si128(xmm0, xmm2));
-	xmm2 = _mm_srli_si128(xmm4, 14);
-	xmm2 = _mm_or_si128(xmm2, _mm_or_si128(_mm_srli_epi16(xmm2, 1), _mm_slli_epi16(xmm2, 1)));
-	xmm3 = _mm_or_si128(xmm3, xmm2);
-
-	xmm2 = _mm_srli_si128(xmm3, 2);
-	xmm0 = _mm_slli_si128(xmm3, 2);
-	xmm3 = _mm_or_si128(xmm3, _mm_or_si128(_mm_srli_epi16(xmm3, 1), _mm_slli_epi16(xmm3, 1)));
-	xmm2 = _mm_or_si128(xmm2, _mm_or_si128(_mm_srli_epi16(xmm2, 1), _mm_slli_epi16(xmm2, 1)));
-	xmm0 = _mm_or_si128(xmm0, _mm_or_si128(_mm_srli_epi16(xmm0, 1), _mm_slli_epi16(xmm0, 1)));
-	xmm3 = _mm_or_si128(xmm3, _mm_or_si128(xmm0, xmm2));
-	xmm2 = _mm_srli_si128(xmm3, 14);
-	xmm2 = _mm_or_si128(xmm2, _mm_or_si128(_mm_srli_epi16(xmm2, 1), _mm_slli_epi16(xmm2, 1)));
-	xmm4 = _mm_or_si128(xmm4, xmm2);
-	
-	xmm3 = _mm_and_si128(xmm3, xmmmask);
-	xmm4 = _mm_and_si128(xmm4, xmmmask);
-	*/
 
 	xmm3 = _mm_andnot_si128(xmml, xmm3);
 	xmm4 = _mm_andnot_si128(xmmr, xmm4);
 
 	_mm_store_si128((__m128i*)&bitboard_mc[0], xmm3);
 	_mm_store_si128((__m128i*)&bitboard_mc[8], xmm4);
+
+	// 3*3-nei to 5*5-nei.
+	__m128i xmm5, xmm6;
+	xmm5 = xmm3;
+	xmm6 = xmm4;
+
+	xmm3 = _mm_or_si128(_mm_srli_epi16(xmm5, 1), _mm_slli_epi16(xmm5, 1));
+	xmm2 = _mm_srli_si128(xmm5, 2);
+	xmm2 = _mm_or_si128(xmm2, _mm_or_si128(_mm_srli_epi16(xmm2, 1), _mm_slli_epi16(xmm2, 1)));
+	xmm3 = _mm_or_si128(xmm3, xmm2);
+	xmm2 = _mm_slli_si128(xmm5, 2);
+	xmm2 = _mm_or_si128(xmm2, _mm_or_si128(_mm_srli_epi16(xmm2, 1), _mm_slli_epi16(xmm2, 1)));
+	xmm3 = _mm_or_si128(xmm3, xmm2);
+	xmm2 = _mm_srli_si128(xmm5, 14);
+	xmm4 = _mm_or_si128(xmm2, _mm_or_si128(_mm_srli_epi16(xmm2, 1), _mm_slli_epi16(xmm2, 1)));
+
+	xmm4 = _mm_or_si128(xmm4, _mm_or_si128(_mm_srli_epi16(xmm6, 1), _mm_slli_epi16(xmm6, 1)));
+	xmm2 = _mm_srli_si128(xmm6, 2);
+	xmm2 = _mm_or_si128(xmm2, _mm_or_si128(_mm_srli_epi16(xmm2, 1), _mm_slli_epi16(xmm2, 1)));
+	xmm4 = _mm_or_si128(xmm4, xmm2);
+	xmm2 = _mm_slli_si128(xmm6, 2);
+	xmm2 = _mm_or_si128(xmm2, _mm_or_si128(_mm_srli_epi16(xmm2, 1), _mm_slli_epi16(xmm2, 1)));
+	xmm4 = _mm_or_si128(xmm4, xmm2);
+	xmm2 = _mm_slli_si128(xmm6, 14);
+	xmm2 = _mm_or_si128(xmm2, _mm_or_si128(_mm_srli_epi16(xmm2, 1), _mm_slli_epi16(xmm2, 1)));
+	xmm3 = _mm_or_si128(xmm3, xmm2);
+
+	xmm4 = _mm_and_si128(xmm4, xmmmask);
+	xmm3 = _mm_and_si128(xmm3, xmmmask);
+
+	xmm3 = _mm_andnot_si128(xmml, xmm3);
+	xmm4 = _mm_andnot_si128(xmmr, xmm4);
+
+	_mm_store_si128((__m128i*)&bitboard_mc55[0], xmm3);
+	_mm_store_si128((__m128i*)&bitboard_mc55[8], xmm4);
+
 }
 
 // Generate hash key.
@@ -569,18 +573,28 @@ int move_gen(move_t* movelist, int color, int depth){
 		bool lookfor_threat = 1;
 		look_again:
 		for (x = 0; x < 15; x++){
-			mask = bitboard_mc[x];
+			if (lookfor_threat)
+				mask = bitboard_mc55[x];
+			else
+				mask = bitboard_mc[x];
 			while (mask){
 				_BitScanForward(&c, mask);
 				y = c;
 				if (lookfor_threat){
-					bit_makemove(x, y, color, 0, 1, 0);
+					bit_makemove(x, y, 1, 0, 1, 0);
 					val = incremental_eval;
-					bit_unmakemove(x, y, color, 0, 1, 0);
-					// If this move do not make a difference, ignore it.
+					bit_unmakemove(x, y, 1, 0, 1, 0);
+					// If this move do not make a difference for computer, see if it's good for human.
 					if (abs32(val - score) == 0){
-						mask &= mask - 1;
-						continue;
+						bit_makemove(x, y, 2, 0, 1, 0);
+						val = incremental_eval;
+						bit_unmakemove(x, y, 2, 0, 1, 0);
+						// If this move do not make a difference for both side, ignore it.
+						if (abs32(val - score) == 0){
+							mask &= mask - 1;
+							continue;
+						}
+						val = (score << 1) - val;
 					}
 				}
 #if defined(USE_TT)
@@ -1082,6 +1096,7 @@ void ai_run(){
 			tryslice[i] = (int32_t)((double)SCORE_WIN / pow(2.0, (9.0 * (ccpu * 2 - i) / (double)ccpu)));
 		tryslice[ccpu] = 0;
 	}
+
 	// Iterative deeping.
 	maxdepth = 0;
 	while (!time_out){
