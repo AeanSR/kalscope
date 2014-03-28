@@ -1035,6 +1035,7 @@ void ai_run(){
 		}
 	}
 #endif
+
 	// See if we are in check.
 	bit_cutidle();
 	unsigned long c;
@@ -1070,31 +1071,12 @@ void ai_run(){
 			mask &= mask - 1;
 		}
 	}
-	// Generate all moves.
-	for (x = 0; x < 15; x++){
-		unsigned long mask = bitboard_mc[x];
-		while (mask){
-			_BitScanForward(&c, mask);
-			y = c;
-#if defined(USE_TT)
-			if (x == bx&&y == by) continue;
-			k ^= zobrist[0][x][y];
-			hash_t* p = &hash_table[k & HASH_SIZE];
-			// move_sort do descending, but we need a ascending sort.
-			pushmove(x, y, -(p->key == k ? p->value : 0));
-			k ^= zobrist[0][x][y];
-#else
-			pushmove(x, y, 0);
-#endif
-			mvcount++;
 
-			mask &= mask - 1;
-		}
-	}
-	if (bx != 0xfe){
-		mvcount++;
-		pushmove(bx, by, INT32_MIN);
-	}
+	// Generate all moves.
+	move_t movelist[225];
+	mvcount = move_gen(movelist, h, 1, 20);
+	for (int i = mvcount - 1; i >= 0; i--)
+		pushmove(movelist[i].x, movelist[i].y, movelist[i].score);
 
 	// Set up a timer.
 	std::thread* timer = new std::thread(thread_timer);
