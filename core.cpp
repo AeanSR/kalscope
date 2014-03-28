@@ -31,10 +31,10 @@ uint64_t node = 0;
 __declspec(thread) uint64_t local_node = 0;
 
 // Some branch-less macros.
-#define sshr32(v,d) (-(int32_t)((uint32_t)(v) >> d))
-#define max32(x,y)  ((x) - (((x) - (y)) & sshr32((x) - (y), 31)))
-#define min32(x,y)  ((y) + (((x) - (y)) & sshr32((x) - (y), 31)))
-#define abs32(v)    (((v) ^ sshr32((v), 31)) - sshr32((v), 31))
+#define sshr32(v) (-(int32_t)((uint32_t)(v) >> 31))
+#define max32(x,y)  ((x) - (((x) - (y)) & sshr32((x) - (y))))
+#define min32(x,y)  ((y) + (((x) - (y)) & sshr32((x) - (y))))
+#define abs32(v)    (((v) ^ sshr32((v))) - sshr32((v)))
 
 // Evaluate score defination.
 #define SCORE_WIN  ((int32_t)(1UL << 30))
@@ -90,6 +90,21 @@ static int init_flag = 0;
 __declspec(thread) int32_t incremental_eval = SCORE_BASE;
 __declspec(thread) int32_t incremental_win = 0;
 __declspec(thread) int32_t backup_incwin = 0;
+__declspec(thread) class bck_stack{
+public: // Due to a known bug of MSVC: http://support.microsoft.com/kb/117383/
+	int32_t bck[225];
+	size_t i;
+public:
+	void reset(){
+		i = 0;
+	}
+	void push(int32_t e){
+		bck[i++] = e;
+	}
+	int32_t pop(){
+		return bck[--i];
+	}
+} backup_inceval;
 __declspec(thread, align(16)) int subscript[16] = { 0 };
 __declspec(thread, align(16)) int subscript_h[16] = { 0 };
 __declspec(thread, align(16)) int subscript_d[32] = { 0 };
@@ -138,7 +153,8 @@ size_t memory_to_use(){
 	a |= a >> 32;
 	a++;
 	a /= sizeof(hash_t);
-	return a > 0 ? a : HASH_SIZE_DEFAULT;
+	//return a > 0 ? a : HASH_SIZE_DEFAULT;
+	return HASH_SIZE_DEFAULT;
 }
 #endif
 
@@ -151,6 +167,7 @@ void __forceinline bit_makemove(int x, int y, char color, bool need_b, bool need
 		to rewrite this function as template / override approach.
 	*/
 	if (need_e){
+		backup_inceval.push( incremental_eval );
 		incremental_eval -= table_f[subscript[x]];
 		incremental_eval -= table_f[subscript_h[y]];
 		incremental_eval -= table_f[subscript_d[14 - x + y]];
@@ -182,12 +199,6 @@ void __forceinline bit_makemove(move_t& move, char color, bool need_b, bool need
 	bit_makemove(move.x, move.y, color, need_b, need_e, need_w);
 }
 void __forceinline bit_unmakemove(int x, int y, char color, bool need_b, bool need_e, bool need_w){
-	if (need_e){
-		incremental_eval -= table_f[subscript[x]];
-		incremental_eval -= table_f[subscript_h[y]];
-		incremental_eval -= table_f[subscript_d[14 - x + y]];
-		incremental_eval -= table_f[subscript_ad[x + y]];
-	}
 	if (need_e||need_w){
 		subscript[x] -= poweru3[y] << (color - 1);
 		subscript_h[y] -= poweru3[x] << (color - 1);
@@ -198,10 +209,7 @@ void __forceinline bit_unmakemove(int x, int y, char color, bool need_b, bool ne
 		bitboard[color - 1][x] &= ~(1 << y);
 	}
 	if (need_e){
-		incremental_eval += table_f[subscript[x]];
-		incremental_eval += table_f[subscript_h[y]];
-		incremental_eval += table_f[subscript_d[14 - x + y]];
-		incremental_eval += table_f[subscript_ad[x + y]];
+		incremental_eval = backup_inceval.pop();
 	}
 	if (need_w){
 		incremental_win = backup_incwin;
@@ -281,6 +289,7 @@ void bit_cutidle(){
 	__m128i xmm2, xmm3, xmm4, xmml, xmmr;
 	const __m128i xmmmask = _mm_set1_epi16(0x7fff);
 
+	// bitboard to 3*3-nei. 
 	xmml = _mm_or_si128(_mm_load_si128((__m128i*)&bitboard[0][0]), _mm_load_si128((__m128i*)&bitboard[1][0]));
 	xmmr = _mm_or_si128(_mm_load_si128((__m128i*)&bitboard[0][8]), _mm_load_si128((__m128i*)&bitboard[1][8]));
 
@@ -563,7 +572,6 @@ int move_gen(move_t* movelist, int color, int depth){
 	int count = 0;
 	int x, y;
 	unsigned long c, mask;
-	int32_t score = incremental_eval;
 	int32_t val = 0;
 
 	bit_cutidle();
@@ -572,25 +580,28 @@ int move_gen(move_t* movelist, int color, int depth){
 	if(depth >= 2){
 		bool lookfor_threat = 1;
 		look_again:
+		// Choose 3*3-nei or 5*5-nei for move candidates.
+		uint16_t* mc;
+		if (lookfor_threat)
+			mc = bitboard_mc55;
+		else
+			mc = bitboard_mc;
+
 		for (x = 0; x < 15; x++){
-			if (lookfor_threat)
-				mask = bitboard_mc55[x];
-			else
-				mask = bitboard_mc[x];
+			mask = mc[x];
 			while (mask){
 				_BitScanForward(&c, mask);
 				y = c;
 				if (lookfor_threat){
-					bit_makemove(x, y, 1, 0, 1, 0);
-					val = incremental_eval;
-					bit_unmakemove(x, y, 1, 0, 1, 0);
+					int32_t score = table_f[subscript[x]] + table_f[subscript_h[y]] + table_f[subscript_d[14 - x + y]] + table_f[subscript_ad[x + y]];
+					val = table_f[subscript[x] + poweru3[y]] + table_f[subscript_h[y] + poweru3[x]]
+						+ table_f[subscript_d[14 - x + y] + poweru3[x]] + table_f[subscript_ad[x + y] + poweru3[x]];
 					// If this move do not make a difference for computer, see if it's good for human.
-					if (abs32(val - score) == 0){
-						bit_makemove(x, y, 2, 0, 1, 0);
-						val = incremental_eval;
-						bit_unmakemove(x, y, 2, 0, 1, 0);
+					if (val == score){
+						val = table_f[subscript[x] + 2 * poweru3[y]] + table_f[subscript_h[y] + 2 * poweru3[x]]
+							+ table_f[subscript_d[14 - x + y] + 2 * poweru3[x]] + table_f[subscript_ad[x + y] + 2 * poweru3[x]];
 						// If this move do not make a difference for both side, ignore it.
-						if (abs32(val - score) == 0){
+						if (val == score){
 							mask &= mask - 1;
 							continue;
 						}
@@ -688,6 +699,7 @@ int32_t fork_subthread(bool* ready, move_t move,
 	// Set up.
 	int32_t reg;
 	local_node = 0;
+	backup_inceval.reset();
 	incremental_eval = ince;
 	incremental_win = incw;
 	backup_incwin = bkincw;
@@ -910,6 +922,7 @@ void thread_body(int maxdepth){
 	int32_t reg;
 	move_t* mp;
 	local_node = 0;
+	backup_inceval.reset();
 	while (getmove(x, y, &mp)){
 		bit_makemove(x, y, 1, 1, 1, 1);
 #if defined(USE_TT)
@@ -971,6 +984,7 @@ uint64_t k, int32_t alpha, int32_t beta, int depth, int who2move){
 	incremental_eval = ince;
 	incremental_win = incw;
 	backup_incwin = bkincw;
+	backup_inceval.reset();
 
 	local_node = 0;
 	int32_t ret = alpha_beta(alpha, beta, depth, who2move, 0);
