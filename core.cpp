@@ -7,7 +7,7 @@
 	for any purpose, as long as this copyright notice is preserved.
 */
 
-// Disable MSVC's annoying secure warnings.
+// Disable MSVC's annoying secure warnings. I don't need security, thank you.
 #define _CRT_SECURE_NO_WARNINGS
 
 #include "stdafx.h"
@@ -15,10 +15,10 @@
 
 // Preprocessed macros to control KS ability.
 #define USE_TT	// Use transpose table or not
-#define  USE_LOG	// Use debug log file or not
+#define USE_LOG	// Use debug log file or not
 
 // State globals shared to interface.
-static const char codename_str[] = "AI Kernel \"Dolanaar\" 2014Mar.";
+static const char codename_str[] = "AI Kernel \"Ruttheran\" 2014Apr.";
 size_t goffset = 0;
 char* init_str = NULL;
 int init_finished = 0;
@@ -68,8 +68,7 @@ struct move_t{
 	short x;
 	short y;
 	void swap(move_t& m){
-		move_t t;
-		t = m;
+		move_t t = m;
 		m = *this;
 		*this = t;
 	}
@@ -95,15 +94,9 @@ public: // Due to a known bug of MSVC: http://support.microsoft.com/kb/117383/
 	int32_t bck[225];
 	size_t i;
 public:
-	void reset(){
-		i = 0;
-	}
-	void push(int32_t e){
-		bck[i++] = e;
-	}
-	int32_t pop(){
-		return bck[--i];
-	}
+	void reset(){i = 0;}
+	void push(int32_t e){bck[i++] = e;}
+	int32_t pop(){return bck[--i];}
 } backup_inceval;
 __declspec(thread, align(16)) int subscript[16] = { 0 };
 __declspec(thread, align(16)) int subscript_h[16] = { 0 };
@@ -154,7 +147,7 @@ size_t memory_to_use(){
 	a++;
 	a /= sizeof(hash_t);
 	//return a > 0 ? a : HASH_SIZE_DEFAULT;
-	return HASH_SIZE_DEFAULT;
+	return HASH_SIZE_DEFAULT; // Using a fixed size yet.
 }
 #endif
 
@@ -405,7 +398,7 @@ void __fastcall record_hash(int32_t score, int x = 0xfe, int y = 0xfe, int type 
 }
 #endif
 
-// Judge if draw.
+// Check if draw.
 char eval_draw(){
 	int x;
 	__m128i xmm1, xmm2 = _mm_setzero_si128();
@@ -420,7 +413,7 @@ char eval_draw(){
 	return !mask;
 }
 
-// Judge if game are not started yet.
+// Check if game are not started yet.
 char eval_null(){
 	int x;
 	__m128i xmm1, xmm2 = _mm_set1_epi8(-1);
@@ -435,7 +428,7 @@ char eval_null(){
 	return mask == 0x7fff;
 }
 
-// Another slower win judge, on mainboard.
+// Another slower win check, on mainboard.
 char eval_win(){
 	int x, y;
 	bool not_be, not_le, not_re;
@@ -643,7 +636,7 @@ int move_gen(move_t* movelist, int color, int depth){
 				mask &= mask - 1;
 			}
 		}
-		// If no move could make a difference, generate all possible moves.
+		// If no move could make a difference, generate all possible moves in 3*3-nei.
 		if (lookfor_threat && count == 0){
 			lookfor_threat = 0;
 			goto look_again;
@@ -732,7 +725,7 @@ int32_t fork_subthread(bool* ready, move_t move,
 
 // Alpha-beta search frame.
 int32_t __fastcall alpha_beta(int32_t alpha, int32_t beta, int depth, int who2move, int is_pv){
-	// If time is up, give up.
+	// If time is up (or the host required to give up), give up.
 	if (time_out)
 		return 0;
 	
@@ -807,7 +800,7 @@ int32_t __fastcall alpha_beta(int32_t alpha, int32_t beta, int depth, int who2mo
 			y = mlist[i].y;
 
 			// If there's an idle CPU, try fork a sub thread.
-			if (is_pv && i >= 1 && ltc < ccpu && depth > 6 && i < count - ltc && forked_move < 16){
+			if (is_pv && i >= 1 && ltc < ccpu && depth > 8 && i < count - ltc && forked_move < 16){
 				ltclock.lock();
 				if (ltc < ccpu){
 					ltc++;
@@ -893,7 +886,7 @@ int32_t __fastcall alpha_beta(int32_t alpha, int32_t beta, int depth, int who2mo
 	}
 }
 
-// Get/put a move for multithread.
+// Get/put a move into task pool for multithread.
 bool getmove(int& _x, int& _y, move_t** ptr = NULL){
 	msl.lock();
 	if (msp == 0){
@@ -1182,6 +1175,7 @@ void ai_run(){
 		maxdepth += 1;
 	}
 
+	// Timer thread is safe to be terminated outside brutally since it doesn't use any mutex.
 	TerminateThread(timer->native_handle(), 0);
 	delete timer;
 	node += local_node;
