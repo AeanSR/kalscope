@@ -15,7 +15,7 @@
 
 // Preprocessed macros to control KS ability.
 #define USE_TT	// Use transpose table or not
-#define USE_LOG	// Use debug log file or not
+//#define USE_LOG	// Use debug log file or not
 
 // State globals shared to interface.
 static const char codename_str[] = "AI Kernel \"Ruttheran\" 2014Apr.";
