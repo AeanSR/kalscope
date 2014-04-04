@@ -3,7 +3,7 @@
 #include "Resource.h"
 
 extern char mainboard[16][16];
-extern int my, mx;
+extern int output_y, output_x;
 extern HINSTANCE hInst;
 void board_clicked(HWND hWnd, unsigned int x, unsigned int y);
 BOOL ImageFromIDResource(UINT nID, LPCTSTR sTR, Image * &pImg);
@@ -19,4 +19,4 @@ extern const char codename_str[];
 extern const int time_limit;
 extern char* init_str;
 extern int init_finished;
-extern unsigned long long node;
+extern unsigned long long node_statistic;

@@ -48,11 +48,11 @@ void paint_board(HWND hWnd){
 	delete myPen[1];
 	delete myPen[2];
 	myPen[1] = new Gdiplus::SolidBrush(Color(255, 255, 255, 255));
-	myGraphics->FillEllipse(myPen[1], Rect(16 + 25 * (mx), 16 + 25 * (my), 8, 8));
+	myGraphics->FillEllipse(myPen[1], Rect(16 + 25 * (output_x), 16 + 25 * (output_y), 8, 8));
 	delete myPen[1];
 
 	char* str = (char*)alloca(256);
-	sprintf(str, "%d knps", node / time_limit);
+	sprintf(str, "%d knps", node_statistic / time_limit);
 	WCHAR* drawString = (WCHAR*)calloc(256, sizeof(WCHAR));
 	MultiByteToWideChar(CP_ACP, 0, str, (int)strlen(str), drawString, 255);
 	// Create font and brush.
@@ -71,7 +71,7 @@ void clear_board(HWND hWnd){
 	for (x = 0; x < 16; x++)
 		for (y = 0; y < 16; y++)
 			mainboard[x][y] = 0;
-	mx = 0xfe;
+	output_x = 0xfe;
 	InvalidateRect(hWnd, NULL, TRUE);
 }
 

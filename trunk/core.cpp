@@ -27,8 +27,8 @@ char* debug_str;
 // Time limit, in millisecond.
 static const int time_limit = 10000;
 volatile bool time_out = 0;
-uint64_t node = 0;
-__declspec(thread) uint64_t local_node = 0;
+uint64_t node_statistic = 0;
+__declspec(thread) uint64_t local_node_statistic = 0;
 
 // Some branch-less macros.
 #define sshr32(v) (-(int32_t)((uint32_t)(v) >> 31))
@@ -36,7 +36,7 @@ __declspec(thread) uint64_t local_node = 0;
 #define min32(x,y)  ((y) + (((x) - (y)) & sshr32((x) - (y))))
 #define abs32(v)    (((v) ^ sshr32((v))) - sshr32((v)))
 
-// Evaluate score defination.
+// Evaluate score defination.`	
 #define SCORE_WIN  ((int32_t)(1UL << 30))
 #define SCORE_LOSE (-SCORE_WIN)
 #define SCORE_MMASK ((int32_t)( 1UL << 10 ) - 1)
@@ -84,7 +84,7 @@ __declspec(thread, align(16)) uint16_t bitboard_mc[16] = { 0 };
 __declspec(thread, align(16)) uint16_t bitboard_mc55[16] = { 0 };
 
 // Structure for evaluate lookup table.
-static int32_t* table_f = NULL;
+static int32_t* eval_tbl = NULL;
 static int init_flag = 0;
 __declspec(thread) int32_t incremental_eval = SCORE_BASE;
 __declspec(thread) int32_t incremental_win = 0;
@@ -107,17 +107,16 @@ static int poweru3[16] = {
 };
 
 // Structure for result reduce.
-int32_t m;
-int my, mx = 0xfe;
+int32_t score_reduce;
+int output_x = 0xfe, output_y;
 int maxdepth = 0;
 
 // Structure for thread sync.
-std::mutex tlock;
-std::mutex hlock[1024];
-std::thread* thm[225] = { NULL };
-size_t tid = 0;
+std::mutex cowork_mut;
+std::mutex tt_mut[1024];
+std::thread* coworker[225] = { NULL };
 volatile size_t ltc = 0;
-std::mutex ltclock;
+std::mutex ltc_mut;
 
 // Get the available processor number.
 int count_processor(){
@@ -161,10 +160,10 @@ void __forceinline bit_makemove(int x, int y, char color, bool need_b, bool need
 	*/
 	if (need_e){
 		backup_inceval.push( incremental_eval );
-		incremental_eval -= table_f[subscript[x]];
-		incremental_eval -= table_f[subscript_h[y]];
-		incremental_eval -= table_f[subscript_d[14 - x + y]];
-		incremental_eval -= table_f[subscript_ad[x + y]];
+		incremental_eval -= eval_tbl[subscript[x]];
+		incremental_eval -= eval_tbl[subscript_h[y]];
+		incremental_eval -= eval_tbl[subscript_d[14 - x + y]];
+		incremental_eval -= eval_tbl[subscript_ad[x + y]];
 	}
 	if (need_e || need_w){
 		subscript[x] += poweru3[y] << (color - 1);
@@ -176,15 +175,15 @@ void __forceinline bit_makemove(int x, int y, char color, bool need_b, bool need
 		bitboard[color - 1][x] |= 1 << y;
 	}
 	if (need_e){
-		incremental_eval += table_f[subscript[x]];
-		incremental_eval += table_f[subscript_h[y]];
-		incremental_eval += table_f[subscript_d[14 - x + y]];
-		incremental_eval += table_f[subscript_ad[x + y]];
+		incremental_eval += eval_tbl[subscript[x]];
+		incremental_eval += eval_tbl[subscript_h[y]];
+		incremental_eval += eval_tbl[subscript_d[14 - x + y]];
+		incremental_eval += eval_tbl[subscript_ad[x + y]];
 	}
 	if (need_w){
 		backup_incwin = incremental_win;
-		incremental_win = incremental_win || (table_f[subscript[x]] & 0x7fffffff) == SCORE_WIN || (table_f[subscript_h[y]] & 0x7fffffff) == SCORE_WIN
-			|| (table_f[subscript_d[14 - x + y]] & 0x7fffffff) == SCORE_WIN || (table_f[subscript_ad[x + y]] & 0x7fffffff) == SCORE_WIN;
+		incremental_win = incremental_win || (eval_tbl[subscript[x]] & 0x7fffffff) == SCORE_WIN || (eval_tbl[subscript_h[y]] & 0x7fffffff) == SCORE_WIN
+			|| (eval_tbl[subscript_d[14 - x + y]] & 0x7fffffff) == SCORE_WIN || (eval_tbl[subscript_ad[x + y]] & 0x7fffffff) == SCORE_WIN;
 
 	}
 }
@@ -219,20 +218,20 @@ void eval_s(){
 	int32_t score = SCORE_BASE;
 	incremental_win = 0;
 	for (x = 0; x < 15; x++){
-		score += table_f[subscript[x]];
-		incremental_win |= abs32(table_f[subscript[x]]) >= SCORE_WIN ;
-		score += table_f[subscript_h[x]];
-		incremental_win |= abs32(table_f[subscript_h[x]]) >= SCORE_WIN;
-		score += table_f[subscript_d[x]];
-		incremental_win |= abs32(table_f[subscript_d[x]]) >= SCORE_WIN;
-		score += table_f[subscript_ad[x]];
-		incremental_win |= abs32(table_f[subscript_ad[x]]) >= SCORE_WIN;
+		score += eval_tbl[subscript[x]];
+		incremental_win |= abs32(eval_tbl[subscript[x]]) >= SCORE_WIN ;
+		score += eval_tbl[subscript_h[x]];
+		incremental_win |= abs32(eval_tbl[subscript_h[x]]) >= SCORE_WIN;
+		score += eval_tbl[subscript_d[x]];
+		incremental_win |= abs32(eval_tbl[subscript_d[x]]) >= SCORE_WIN;
+		score += eval_tbl[subscript_ad[x]];
+		incremental_win |= abs32(eval_tbl[subscript_ad[x]]) >= SCORE_WIN;
 	}
 	for (x = 15; x < 30; x++){
-		score += table_f[subscript_d[x]];
-		incremental_win |= abs32(table_f[subscript_d[x]]) >= SCORE_WIN;
-		score += table_f[subscript_ad[x]];
-		incremental_win |= abs32(table_f[subscript_ad[x]]) >= SCORE_WIN;
+		score += eval_tbl[subscript_d[x]];
+		incremental_win |= abs32(eval_tbl[subscript_d[x]]) >= SCORE_WIN;
+		score += eval_tbl[subscript_ad[x]];
+		incremental_win |= abs32(eval_tbl[subscript_ad[x]]) >= SCORE_WIN;
 	}
 	incremental_eval = score;
 }
@@ -383,9 +382,9 @@ uint64_t zobrist_key(){
 #if defined(USE_TT)
 void __fastcall record_hash(int32_t score, int x = 0xfe, int y = 0xfe, int type = TYPE_NON, int depth = 0){
 	hash_t* p = &hash_table[key & HASH_SIZE];
-	hlock[key % 1024].lock();
+	tt_mut[key % 1024].lock();
 	if (p->depth > depth){
-		hlock[key % 1024].unlock();
+		tt_mut[key % 1024].unlock();
 		return;
 	}
 	p->key = key;
@@ -394,7 +393,7 @@ void __fastcall record_hash(int32_t score, int x = 0xfe, int y = 0xfe, int type 
 	p->y = y;
 	p->type = type;
 	p->depth = depth;
-	hlock[key % 1024].unlock();
+	tt_mut[key % 1024].unlock();
 }
 #endif
 
@@ -478,8 +477,8 @@ void init_table(){
 	static std::mt19937_64 rng;
 	
 	strcpy(init_str, "Constructing evaluation table ...");
-	table_f = (int32_t*)_aligned_malloc(14348907 * sizeof(int32_t),16);
-	if (table_f == NULL)
+	eval_tbl = (int32_t*)_aligned_malloc(14348907 * sizeof(int32_t),16);
+	if (eval_tbl == NULL)
 		exit(0);
 
 	strcpy(init_str, "Reading evaluation table ...");
@@ -490,7 +489,7 @@ void init_table(){
 		exit(0);
 	}
 	while (!gzeof(in)){
-		goffset += gzread(in, ((char*)table_f) + goffset, 4096);
+		goffset += gzread(in, ((char*)eval_tbl) + goffset, 4096);
 		sprintf(init_str, "Reading evaluation table (%d%%)...", goffset * 100 / (14348907 * sizeof(int32_t)));
 	}
 	gzclose(in);
@@ -586,13 +585,13 @@ int move_gen(move_t* movelist, int color, int depth){
 				_BitScanForward(&c, mask);
 				y = c;
 				if (lookfor_threat){
-					int32_t score = table_f[subscript[x]] + table_f[subscript_h[y]] + table_f[subscript_d[14 - x + y]] + table_f[subscript_ad[x + y]];
-					val = table_f[subscript[x] + poweru3[y]] + table_f[subscript_h[y] + poweru3[x]]
-						+ table_f[subscript_d[14 - x + y] + poweru3[x]] + table_f[subscript_ad[x + y] + poweru3[x]];
+					int32_t score = eval_tbl[subscript[x]] + eval_tbl[subscript_h[y]] + eval_tbl[subscript_d[14 - x + y]] + eval_tbl[subscript_ad[x + y]];
+					val = eval_tbl[subscript[x] + poweru3[y]] + eval_tbl[subscript_h[y] + poweru3[x]]
+						+ eval_tbl[subscript_d[14 - x + y] + poweru3[x]] + eval_tbl[subscript_ad[x + y] + poweru3[x]];
 					// If this move do not make a difference for computer, see if it's good for human.
 					if (val == score){
-						val = table_f[subscript[x] + 2 * poweru3[y]] + table_f[subscript_h[y] + 2 * poweru3[x]]
-							+ table_f[subscript_d[14 - x + y] + 2 * poweru3[x]] + table_f[subscript_ad[x + y] + 2 * poweru3[x]];
+						val = eval_tbl[subscript[x] + 2 * poweru3[y]] + eval_tbl[subscript_h[y] + 2 * poweru3[x]]
+							+ eval_tbl[subscript_d[14 - x + y] + 2 * poweru3[x]] + eval_tbl[subscript_ad[x + y] + 2 * poweru3[x]];
 						// If this move do not make a difference for both side, ignore it.
 						if (val == score){
 							mask &= mask - 1;
@@ -691,7 +690,7 @@ int32_t fork_subthread(bool* ready, move_t move,
 	
 	// Set up.
 	int32_t reg;
-	local_node = 0;
+	local_node_statistic = 0;
 	backup_inceval.reset();
 	incremental_eval = ince;
 	incremental_win = incw;
@@ -712,13 +711,13 @@ int32_t fork_subthread(bool* ready, move_t move,
 		reg = -alpha_beta(-beta, -alpha, depth - 1, -who2move, 1);
 
 	// Ready to return, decrease ltc.
-	ltclock.lock();
+	ltc_mut.lock();
 	ltc--;
-	ltclock.unlock();
+	ltc_mut.unlock();
 
-	tlock.lock();
-	node += local_node;
-	tlock.unlock();
+	cowork_mut.lock();
+	node_statistic += local_node_statistic;
+	cowork_mut.unlock();
 
 	return reg;
 }
@@ -737,7 +736,7 @@ int32_t __fastcall alpha_beta(int32_t alpha, int32_t beta, int depth, int who2mo
 	int alpha_raised = 0;
 	bool ready = 0;
 
-	local_node++;
+	local_node_statistic++;
 
 	if (depth == 0){
 
@@ -801,10 +800,10 @@ int32_t __fastcall alpha_beta(int32_t alpha, int32_t beta, int depth, int who2mo
 
 			// If there's an idle CPU, try fork a sub thread.
 			if (is_pv && i >= 1 && ltc < ccpu && depth > 8 && i < count - ltc && forked_move < 16){
-				ltclock.lock();
+				ltc_mut.lock();
 				if (ltc < ccpu){
 					ltc++;
-					ltclock.unlock();
+					ltc_mut.unlock();
 					ready = 0;
 					forked_return[forked_move] = std::async(
 						fork_subthread, &ready, mlist[i], bitboard,
@@ -822,7 +821,7 @@ int32_t __fastcall alpha_beta(int32_t alpha, int32_t beta, int depth, int who2mo
 						std::this_thread::yield();
 					continue;
 				}
-				else ltclock.unlock();
+				else ltc_mut.unlock();
 			}
 
 			// Make move.
@@ -914,16 +913,16 @@ void thread_body(int maxdepth){
 	int32_t localm;
 	int32_t reg;
 	move_t* mp;
-	local_node = 0;
+	local_node_statistic = 0;
 	backup_inceval.reset();
 	while (getmove(x, y, &mp)){
 		bit_makemove(x, y, 1, 1, 1, 1);
 #if defined(USE_TT)
 		key = zobrist_key();
 #endif
-		tlock.lock();
-		localm = m;
-		tlock.unlock();
+		cowork_mut.lock();
+		localm = score_reduce;
+		cowork_mut.unlock();
 
 		if (localm <= SCORE_LOSE)
 			reg = -alpha_beta(-SCORE_WIN, -localm + 1, maxdepth, -1, 1);
@@ -934,9 +933,9 @@ void thread_body(int maxdepth){
 		}
 		
 		if (time_out){
-			tlock.lock();
-			node += local_node;
-			tlock.unlock();
+			cowork_mut.lock();
+			node_statistic += local_node_statistic;
+			cowork_mut.unlock();
 			return;
 		}
 
@@ -948,18 +947,18 @@ void thread_body(int maxdepth){
 
 		mp->score = -reg; // move_sort do descending, but we need a ascending sort.
 
-		tlock.lock();
-		if (reg > m){
-			m = reg;
-			mx = x;
-			my = y;
+		cowork_mut.lock();
+		if (reg > score_reduce){
+			score_reduce = reg;
+			output_x = x;
+			output_y = y;
 		}
-		tlock.unlock();
+		cowork_mut.unlock();
 		bit_unmakemove(x, y, 1, 1, 1, 1);
 	}
-	tlock.lock();
-	node += local_node;
-	tlock.unlock();
+	cowork_mut.lock();
+	node_statistic += local_node_statistic;
+	cowork_mut.unlock();
 
 }
 
@@ -979,11 +978,11 @@ uint64_t k, int32_t alpha, int32_t beta, int depth, int who2move){
 	backup_incwin = bkincw;
 	backup_inceval.reset();
 
-	local_node = 0;
+	local_node_statistic = 0;
 	int32_t ret = alpha_beta(alpha, beta, depth, who2move, 0);
-	tlock.lock();
-	node += local_node;
-	tlock.unlock();
+	cowork_mut.lock();
+	node_statistic += local_node_statistic;
+	cowork_mut.unlock();
 	return ret;
 }
 
@@ -999,12 +998,12 @@ void ai_run(){
 	int x, y;
 
 	// Initialize.
-	tid = 0;
+	size_t tid = 0;
 	time_out = 0;
-	mx = 0xfe;
+	output_x = 0xfe;
 	msp = 0;
-	node = 0;
-	local_node = 0;
+	node_statistic = 0;
+	local_node_statistic = 0;
 	init_table();
 	int mvcount = 0;
 	int bx = 0xfe;
@@ -1039,8 +1038,8 @@ void ai_run(){
 			y = c;
 			bit_makemove(x, y, 1, 0, 0, 1);
 			if (incremental_win){
-				mx = x;
-				my = y;
+				output_x = x;
+				output_y = y;
 				mainboard[x][y] = 1;
 				return;
 			}
@@ -1055,8 +1054,8 @@ void ai_run(){
 			y = c;
 			bit_makemove(x, y, 2, 0, 0, 1);
 			if (incremental_win){
-				mx = x;
-				my = y;
+				output_x = x;
+				output_y = y;
 				mainboard[x][y] = 1;
 				return;
 			}
@@ -1067,7 +1066,26 @@ void ai_run(){
 
 	// Generate all moves.
 	move_t movelist[225];
-	mvcount = move_gen(movelist, h, 1, 20);
+	int popc = 0; // Population count for red pieces.
+	for (int i = 0; i < 15; i++)
+		popc += __popcnt16(bitboard[0][i]);
+	if (popc > 4){ // Middle game or end game, use move generator to find threaten.
+		mvcount = move_gen(movelist, h, 1, 20);
+	}
+	else{ // Start phase, generate all 3*3-nei.
+		for (x = 0; x < 15; x++){
+			unsigned long mask = bitboard_mc[x];
+			while (mask){
+				_BitScanForward(&c, mask);
+				y = c;
+				movelist[mvcount].x = x;
+				movelist[mvcount].y = y;
+				movelist[mvcount].score = 0;
+				mvcount++;
+				mask &= mask - 1;
+			}
+		}
+	}
 	for (int i = mvcount - 1; i >= 0; i--)
 		pushmove(movelist[i].x, movelist[i].y, movelist[i].score);
 
@@ -1096,8 +1114,8 @@ void ai_run(){
 		move_t* mp;
 		if (!getmove(x, y, &mp))
 			return;
-		mx = x;
-		my = y;
+		output_x = x;
+		output_y = y;
 		bit_makemove(x, y, 1, 1, 1, 1);
 #if defined(USE_TT)
 		key ^= zobrist[0][x][y];
@@ -1107,7 +1125,7 @@ void ai_run(){
 		int32_t ret;
 		if (ccpu == 1 || maxdepth < 8){
 			ltc = 1;
-			m = -alpha_beta(-SCORE_WIN, -SCORE_LOSE, maxdepth, -1, 1);
+			score_reduce = -alpha_beta(-SCORE_WIN, -SCORE_LOSE, maxdepth, -1, 1);
 		}
 		else{
 			ltc = ccpu;
@@ -1122,16 +1140,16 @@ void ai_run(){
 				sprintf(app, "SLICE %08X, %08X, %08X\n", tryslice[i], ret, tryslice[i+1]);
 				strcat(debug_str, app);
 #endif
-				ltclock.lock();
+				ltc_mut.lock();
 				ltc--;
-				ltclock.unlock();
+				ltc_mut.unlock();
 				if (ret < tryslice[i + 1] && ret >= tryslice[i]){
-					m = -ret;
+					score_reduce = -ret;
 					ltc = 0;
 					break;
 					
 				}
-				m = -tryslice[ccpu];
+				score_reduce = -tryslice[ccpu];
 			}
 		}
 
@@ -1141,11 +1159,11 @@ void ai_run(){
 			sprintf(app, "SORT (%d,%d) - %08X\n", msa[dei].x, msa[dei].y, msa[dei].score);
 			strcat(debug_str, app);
 		}
-		sprintf(app, "OLDBRO move(%d,%d), maxd %d, score %08X\n", x, y, maxdepth, m);
+		sprintf(app, "OLDBRO move(%d,%d), maxd %d, score %08X\n", x, y, maxdepth, score_reduce);
 		strcat(debug_str, app);
 #endif
 
-		mp->score = -m;
+		mp->score = -score_reduce;
 		bit_unmakemove(x, y, 1, 1, 1, 1);
 #if defined(USE_TT)
 		key ^= zobrist[0][x][y];
@@ -1153,24 +1171,24 @@ void ai_run(){
 		// Young brother starts.
 		ltc = 0;
 		for (x = 0; x < ccpu; x++)
-			thm[tid++] = new std::thread(thread_body, maxdepth);
+			coworker[tid++] = new std::thread(thread_body, maxdepth);
 		ltc = tid;
 
 		// Reduce.
 		do{
 			--tid;
-			ltclock.lock();
+			ltc_mut.lock();
 			--ltc;
-			ltclock.unlock();
-			if (thm[tid]){
-				thm[tid]->join();
-				delete thm[tid];
-				thm[tid] = NULL;
+			ltc_mut.unlock();
+			if (coworker[tid]){
+				coworker[tid]->join();
+				delete coworker[tid];
+				coworker[tid] = NULL;
 			}
 		} while (tid && tid < 256);
 
 		// If win / lose were already determined, we don't need to search more.
-		if (m >= SCORE_WIN || m <= SCORE_LOSE)
+		if (score_reduce >= SCORE_WIN || score_reduce <= SCORE_LOSE)
 			break;
 		maxdepth += 1;
 	}
@@ -1178,11 +1196,11 @@ void ai_run(){
 	// Timer thread is safe to be terminated outside brutally since it doesn't use any mutex.
 	TerminateThread(timer->native_handle(), 0);
 	delete timer;
-	node += local_node;
+	node_statistic += local_node_statistic;
 
 #if defined(USE_LOG)
 	char* app = (char*)alloca(256);
-	sprintf(app, "choose move(%d,%d).\n", mx, my);
+	sprintf(app, "choose move(%d,%d).\n", output_x, output_y);
 	strcat(debug_str, app);
 
 	FILE* f = fopen("debuglog.txt", "w");
@@ -1192,5 +1210,5 @@ void ai_run(){
 #endif
 
 	// Make the actual move.
-	mainboard[mx][my] = 1;
+	mainboard[output_x][output_y] = 1;
 }
