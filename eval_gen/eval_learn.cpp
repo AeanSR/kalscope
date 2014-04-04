@@ -1,6 +1,6 @@
 /*
 	KalScope - A Gomoku AI Implement
-	Evaluation Table Self-Learn Tuner
+	Evaluation Table Self-Learning Tuner
 	Copyright (C) 2014 AeanSR <http://aean.net/>
 
 	Free to use, copy, modify or distribute. No warranty is given.
