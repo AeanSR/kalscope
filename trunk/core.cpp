@@ -30,12 +30,6 @@ volatile bool time_out = 0;
 uint64_t node_statistic = 0;
 __declspec(thread) uint64_t local_node_statistic = 0;
 
-// Some branch-less macros.
-#define sshr32(v) (-(int32_t)((uint32_t)(v) >> 31))
-#define max32(x,y)  ((x) - (((x) - (y)) & sshr32((x) - (y))))
-#define min32(x,y)  ((y) + (((x) - (y)) & sshr32((x) - (y))))
-#define abs32(v)    (((v) ^ sshr32((v))) - sshr32((v)))
-
 // Evaluate score defination.`	
 #define SCORE_WIN  ((int32_t)(1UL << 30))
 #define SCORE_LOSE (-SCORE_WIN)
@@ -219,19 +213,19 @@ void eval_s(){
 	incremental_win = 0;
 	for (x = 0; x < 15; x++){
 		score += eval_tbl[subscript[x]];
-		incremental_win |= abs32(eval_tbl[subscript[x]]) >= SCORE_WIN ;
+		incremental_win |= (eval_tbl[subscript[x]] & 0x7fffffff == SCORE_WIN);
 		score += eval_tbl[subscript_h[x]];
-		incremental_win |= abs32(eval_tbl[subscript_h[x]]) >= SCORE_WIN;
+		incremental_win |= (eval_tbl[subscript_h[x]] & 0x7fffffff == SCORE_WIN);
 		score += eval_tbl[subscript_d[x]];
-		incremental_win |= abs32(eval_tbl[subscript_d[x]]) >= SCORE_WIN;
+		incremental_win |= (eval_tbl[subscript_d[x]] & 0x7fffffff == SCORE_WIN);
 		score += eval_tbl[subscript_ad[x]];
-		incremental_win |= abs32(eval_tbl[subscript_ad[x]]) >= SCORE_WIN;
+		incremental_win |= (eval_tbl[subscript_ad[x]] & 0x7fffffff == SCORE_WIN);
 	}
 	for (x = 15; x < 30; x++){
 		score += eval_tbl[subscript_d[x]];
-		incremental_win |= abs32(eval_tbl[subscript_d[x]]) >= SCORE_WIN;
+		incremental_win |= (eval_tbl[subscript_d[x]] & 0x7fffffff == SCORE_WIN);
 		score += eval_tbl[subscript_ad[x]];
-		incremental_win |= abs32(eval_tbl[subscript_ad[x]]) >= SCORE_WIN;
+		incremental_win |= (eval_tbl[subscript_ad[x]] & 0x7fffffff == SCORE_WIN);
 	}
 	incremental_eval = score;
 }
@@ -1170,7 +1164,7 @@ void ai_run(){
 #endif
 		// Young brother starts.
 		ltc = 0;
-		for (x = 0; x < ccpu; x++)
+		for (x = 0; x < ccpu && x < 225; x++)
 			coworker[tid++] = new std::thread(thread_body, maxdepth);
 		ltc = tid;
 
