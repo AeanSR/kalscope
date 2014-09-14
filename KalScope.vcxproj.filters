@@ -27,10 +27,10 @@
     <ClInclude Include="KalScope.h">
       <Filter>头文件</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\aeanswiftriver%40gmail.com\KalScope\zlib\zconf.h">
+    <ClInclude Include="zlib\zconf.h">
       <Filter>头文件</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\aeanswiftriver%40gmail.com\KalScope\zlib\zlib.h">
+    <ClInclude Include="zlib\zlib.h">
       <Filter>头文件</Filter>
     </ClInclude>
   </ItemGroup>
